@@ -1,10 +1,9 @@
 fastapi
 uvicorn[standard]
 openai
-langchain
-langchain-openai
 pypdf
 youtube-transcript-api
 python-dotenv
 google-api-python-client
 python-multipart
+numpy

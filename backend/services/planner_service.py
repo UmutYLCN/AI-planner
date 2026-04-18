@@ -39,8 +39,12 @@ class PlannerService:
             limit_info = f"Plan at a relaxed pace. Today is {today}."
 
         system_prompt = """\
-You are an expert AI Study Planner. Given a summary of study materials (PDFs and/or YouTube videos), 
-create a detailed, realistic DAY-BY-DAY learning schedule.
+You are an expert AI Study Planner. You receive study materials that may be SEMANTICALLY GROUPED — 
+meaning a PDF section and a YouTube video under the same topic cover the SAME subject matter.
+Create a detailed, realistic DAY-BY-DAY learning schedule.
+
+IMPORTANT: When materials are grouped by topic, schedule the PDF reading AND the related video 
+on the SAME DAY so the student gets complementary perspectives on each subject.
 
 Return ONLY valid JSON matching this schema exactly:
 {
