@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UploadCloud, PlaySquare, Plus, Link as LinkIcon, Clock, CalendarDays, Loader2, FileText, ArrowRight, ArrowLeft } from "lucide-react";
+import { X, UploadCloud, PlaySquare, Plus, Link as LinkIcon, Clock, CalendarDays, Loader2, FileText, ArrowRight, ArrowLeft, BookOpen } from "lucide-react";
 import { db } from "@/lib/db";
 import { useRouter } from "next/navigation";
 
@@ -15,7 +15,6 @@ type Step = 1 | 2 | 3;
 export default function CreateWizard({ onClose, onCreated }: Props) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
-  const [inputType, setInputType] = useState<"pdf" | "youtube">("pdf");
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [youtubeUrls, setYoutubeUrls] = useState<string[]>([""]);
   const [mode, setMode] = useState<"daily_hours" | "target_date">("daily_hours");
@@ -41,8 +40,9 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
   // ── Step validation ───────────────────────────────────────────────────────
   const canProceed = () => {
     if (step === 1) {
-      if (inputType === "pdf") return pdfFiles.length > 0;
-      return youtubeUrls.some((u) => u.trim() !== "");
+      const hasPdf = pdfFiles.length > 0;
+      const hasYoutube = youtubeUrls.some((u) => u.trim() !== "");
+      return hasPdf || hasYoutube;
     }
     if (step === 2) {
       if (mode === "daily_hours") return !!dailyHours;
@@ -72,12 +72,8 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
       const formData = new FormData();
       const validUrls = youtubeUrls.filter((u) => u.trim());
 
-      if (inputType === "pdf") {
-        pdfFiles.forEach((f) => formData.append("files", f));
-        formData.append("youtube_urls", "[]");
-      } else {
-        formData.append("youtube_urls", JSON.stringify(validUrls));
-      }
+      pdfFiles.forEach((f) => formData.append("files", f));
+      formData.append("youtube_urls", JSON.stringify(validUrls));
 
       formData.append("mode", mode);
       if (mode === "daily_hours") formData.append("daily_hours", dailyHours);
@@ -90,15 +86,10 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "API error");
 
-      const materialNames =
-        inputType === "pdf"
-          ? pdfFiles.map((f) => f.name)
-          : validUrls;
-
       const id = await db.roadmaps.add({
         title: data.roadmap.title,
-        sourceType: inputType,
-        materialNames,
+        sourceType: "mixed",
+        materialNames: [...pdfFiles.map(f => f.name), ...validUrls],
         constraints: {
           mode,
           daily_hours: mode === "daily_hours" ? parseFloat(dailyHours) : undefined,
@@ -106,6 +97,7 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
         },
         roadmap: data.roadmap,
         progress: {},
+        attachedFiles: pdfFiles.map(f => ({ name: f.name, data: f })),
         createdAt: new Date(),
       });
 
@@ -115,7 +107,7 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
     } catch (err: any) {
       clearInterval(interval);
       alert("Error: " + err.message);
-      setStep(2);
+      setStep(1); // Return to materials step on error
       setIsLoading(false);
     }
   };
@@ -175,33 +167,20 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
         <div style={{ padding: 28 }}>
           <AnimatePresence mode="wait">
 
-            {/* ── STEP 1: Materials ── */}
+            {/* ── STEP 1: Materials (Hybrid) ── */}
             {step === 1 && (
               <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 20, background: "var(--cream)", borderRadius: 100, padding: 4, border: "2px solid var(--border-clay)" }}>
-                  {[["pdf", "PDF Files", <UploadCloud className="w-4 h-4" />], ["youtube", "YouTube Links", <PlaySquare className="w-4 h-4" />]].map(([t, label, icon]) => (
-                    <button
-                      key={t as string}
-                      onClick={() => setInputType(t as "pdf" | "youtube")}
-                      className={`btn-clay ${inputType === t ? "btn-navy" : ""}`}
-                      style={{
-                        flex: 1, padding: "10px 0", fontSize: 14, borderRadius: 100,
-                        background: inputType === t ? "var(--navy)" : "transparent",
-                        color: inputType === t ? "white" : "var(--navy)",
-                        border: "none", boxShadow: "none",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6
-                      }}
-                    >
-                      {icon as React.ReactNode} {label as string}
-                    </button>
-                  ))}
-                </div>
+                <p style={{ fontSize: 13, fontWeight: 700, color: "var(--navy-mid)", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                  <BookOpen className="w-4 h-4" /> Add Study Materials
+                </p>
 
-                {inputType === "pdf" ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* PDF Section */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>PDF Documents</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <input type="file" accept="application/pdf" multiple ref={fileInputRef} onChange={handleFiles} style={{ display: "none" }} />
                     {pdfFiles.map((f, i) => (
-                      <div key={i} className="clay-card clay-card-blue" style={{ padding: "12px 16px", borderRadius: 14, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div key={i} className="clay-card clay-card-blue" style={{ padding: "10px 14px", borderRadius: 12, display: "flex", alignItems: "center", gap: 10 }}>
                         <FileText className="w-4 h-4" style={{ color: "#3b82f6", flexShrink: 0 }} />
                         <span style={{ fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
                         <button onClick={() => setPdfFiles(p => p.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", flexShrink: 0 }}>
@@ -212,29 +191,35 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       style={{
-                        border: "2.5px dashed #94a3b8", borderRadius: 18, padding: "28px 16px",
-                        background: "white", cursor: "pointer", display: "flex", flexDirection: "column",
-                        alignItems: "center", gap: 8, color: "#64748b", transition: "border-color 0.2s",
+                        border: "2.5px dashed var(--border-clay)", borderRadius: 16, padding: "16px",
+                        background: "rgba(255,255,255,0.4)", cursor: "pointer", display: "flex",
+                        alignItems: "center", justifyContent: "center", gap: 8, color: "var(--navy-mid)", transition: "all 0.2s",
                         width: "100%"
                       }}
+                      onMouseOver={(e) => (e.currentTarget.style.borderColor = "var(--navy)")}
+                      onMouseOut={(e) => (e.currentTarget.style.borderColor = "var(--border-clay)")}
                     >
-                      <UploadCloud className="w-8 h-8" />
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{pdfFiles.length === 0 ? "Click to add PDF(s)" : "Add more PDFs"}</span>
+                      <UploadCloud className="w-5 h-5" />
+                      <span style={{ fontWeight: 700, fontSize: 13 }}>{pdfFiles.length === 0 ? "Upload PDFs" : "Add more PDFs"}</span>
                     </button>
                   </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                </div>
+
+                {/* YouTube Section */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>YouTube Videos / Playlists</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {youtubeUrls.map((url, i) => (
                       <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <div
                           className="clay-card"
-                          style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 14 }}
+                          style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 12, background: "white" }}
                         >
-                          <LinkIcon className="w-4 h-4" style={{ color: "#94a3b8", flexShrink: 0 }} />
+                          <PlaySquare className="w-4 h-4" style={{ color: "#ef4444", flexShrink: 0 }} />
                           <input
                             value={url}
                             onChange={(e) => updateUrl(i, e.target.value)}
-                            placeholder="https://youtube.com/watch?v=... or playlist"
+                            placeholder="Paste link here..."
                             style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13 }}
                           />
                         </div>
@@ -247,12 +232,12 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
                     ))}
                     <button
                       onClick={() => setYoutubeUrls(u => [...u, ""])}
-                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "var(--green-dark)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "var(--green-dark)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}
                     >
-                      <Plus className="w-4 h-4" /> Add another URL
+                      <Plus className="w-4 h-4" /> Add another link
                     </button>
                   </div>
-                )}
+                </div>
               </motion.div>
             )}
 

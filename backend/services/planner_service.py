@@ -40,7 +40,7 @@ class PlannerService:
 
         system_prompt = """\
 You are an expert AI Study Planner. Given a summary of study materials (PDFs and/or YouTube videos), 
-create a detailed, realistic learning roadmap.
+create a detailed, realistic DAY-BY-DAY learning schedule.
 
 Return ONLY valid JSON matching this schema exactly:
 {
@@ -48,23 +48,40 @@ Return ONLY valid JSON matching this schema exactly:
   "total_estimated_hours": number,
   "recommended_daily_hours": number,
   "estimated_finish_date": "YYYY-MM-DD",
-  "modules": [
+  "days": [
     {
-      "module_name": "string",
-      "estimated_hours": number,
-      "topics": ["string", ...],
-      "suggested_schedule": "string (e.g. Day 1-3 or Week 1)",
-      "youtube_url": "string (URL of the primary video for this module, or null if text/PDF based)"
+      "day": 1,
+      "total_hours": number,
+      "resources": [
+        {
+          "type": "pdf" or "video",
+          "title": "string (short descriptive name for this study block)",
+          "pdf_name": "string (exact filename, only if type=pdf, else null)",
+          "page_range": "string (e.g. 'Pages 1-40', only if type=pdf, else null)",
+          "youtube_url": "string (full URL, only if type=video, else null)",
+          "topics": ["string", ...],
+          "estimated_minutes": number
+        }
+      ]
     }
   ]
 }
 
-Rules:
-- Group logically related topics into modules (not one module per video/chapter).
-- Be realistic with time estimates based on content volume.
-- suggested_schedule should be human-readable day or week ranges.
-- If a module is primarily based on a YouTube video from the summary, assign its exact URL to youtube_url.
-- If the user gave a target date, set recommended_daily_hours to your calculated value.
+CRITICAL RULES:
+1. Each object in the 'days' array represents ONE calendar day. A day contains multiple resources.
+2. INTERLEAVE resource types within each day. Do NOT put all PDFs on early days and all videos on later days. Mix them within the same day when possible.
+3. EXHAUSTIVE INCLUSION: You MUST include EVERY SINGLE video and EVERY SINGLE PDF mentioned in the summary. Do NOT skip, summarize, or group videos together to save space. Every single provided video must be a distinct resource in the roadmap.
+4. CONTINUATION: If you run out of one type of material (e.g., PDFs are finished), you MUST continue mapping the remaining resources of the other type (e.g., all the remaining videos) into subsequent days until 100% of the materials are mapped.
+5. For PDF resources:
+   - 'pdf_name' MUST exactly match the filename provided in the summary (e.g. "1-programming.pdf").
+   - 'page_range' MUST specify which pages to study (e.g. "Pages 1-40").
+   - 'topics' should list the key concepts/sections within those pages (these appear in the sidebar when clicked).
+6. For video resources:
+   - 'youtube_url' must be the exact video URL from the summary.
+   - 'topics' should list the key concepts covered in the video.
+7. Distribute workload evenly across days based on the student's available hours.
+8. If target_date is set, calculate recommended_daily_hours accordingly.
+9. Keep resource titles SHORT. Do not repeat the filename — use a descriptive topic name instead.
 """
 
         user_prompt = f"## Study Materials Summary:\n\n{materials_summary}\n\n## Student Constraints:\n{limit_info}"

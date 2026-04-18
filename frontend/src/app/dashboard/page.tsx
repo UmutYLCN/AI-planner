@@ -28,10 +28,11 @@ export default function DashboardPage() {
   };
 
   const calcProgress = (r: RoadmapRecord) => {
-    const totalTopics = r.roadmap.modules.reduce((acc, m) => acc + m.topics.length, 0);
-    if (totalTopics === 0) return 0;
+    const days = r.roadmap.days ?? [];
+    const totalRes = days.reduce((a, d) => a + d.resources.length, 0);
+    if (totalRes === 0) return 0;
     const done = Object.values(r.progress).filter(Boolean).length;
-    return Math.round((done / totalTopics) * 100);
+    return Math.round((done / totalRes) * 100);
   };
 
   const CARD_COLORS = [
@@ -182,7 +183,7 @@ export default function DashboardPage() {
 
                         {/* Stages count */}
                         <div style={{ fontSize: 13, color: "#64748b", marginTop: 12 }}>
-                          {r.roadmap.modules.length} stages · {r.roadmap.modules.reduce((a, m) => a + m.topics.length, 0)} topics
+                          {(r.roadmap.days ?? []).length} days · {(r.roadmap.days ?? []).reduce((a, d) => a + d.resources.length, 0)} resources
                         </div>
                       </div>
                     </Link>
