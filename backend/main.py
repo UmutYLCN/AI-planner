@@ -83,7 +83,7 @@ async def generate_plan(
                 videos = yt_service.process_url(url)
                 total_minutes = sum(v["duration_minutes"] for v in videos)
                 video_lines = "\n".join(
-                    f"  - {v['title']} ({v['duration_minutes']}min)" for v in videos
+                    f"  - {v['title']} (URL: https://youtube.com/watch?v={v['id']}, Duration: {v['duration_minutes']}min)" for v in videos
                 )
                 materials_parts.append(
                     f"### YouTube Source: {url}\n"

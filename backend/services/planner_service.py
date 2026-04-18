@@ -53,7 +53,8 @@ Return ONLY valid JSON matching this schema exactly:
       "module_name": "string",
       "estimated_hours": number,
       "topics": ["string", ...],
-      "suggested_schedule": "string (e.g. Day 1-3 or Week 1)"
+      "suggested_schedule": "string (e.g. Day 1-3 or Week 1)",
+      "youtube_url": "string (URL of the primary video for this module, or null if text/PDF based)"
     }
   ]
 }
@@ -62,6 +63,7 @@ Rules:
 - Group logically related topics into modules (not one module per video/chapter).
 - Be realistic with time estimates based on content volume.
 - suggested_schedule should be human-readable day or week ranges.
+- If a module is primarily based on a YouTube video from the summary, assign its exact URL to youtube_url.
 - If the user gave a target date, set recommended_daily_hours to your calculated value.
 """
 

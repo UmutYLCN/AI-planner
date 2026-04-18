@@ -25,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${nunito.variable}`}>
-      <body style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif" }}>
+    <html lang="en" className={`${dmSans.variable} ${nunito.variable}`} suppressHydrationWarning>
+      <body style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif" }} suppressHydrationWarning>
         {children}
       </body>
     </html>

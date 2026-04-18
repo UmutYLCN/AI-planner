@@ -54,7 +54,7 @@ export default function DashboardPage() {
         </Link>
 
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <Link href="/dashboard" style={{ fontWeight: 600, fontSize: 14, color: "var(--navy)", textDecoration: "none", padding: "8px 16px", background: "var(--navy)", borderRadius: 100, color: "white" }}>
+          <Link href="/dashboard" style={{ fontWeight: 600, fontSize: 14, textDecoration: "none", padding: "8px 16px", background: "var(--navy)", borderRadius: 100, color: "white" }}>
             Dashboard
           </Link>
           <Link href="/settings" style={{ fontWeight: 600, fontSize: 14, color: "#64748b", textDecoration: "none", padding: "8px 16px" }}>
