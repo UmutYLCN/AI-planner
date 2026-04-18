@@ -19,12 +19,13 @@ const ReactPlayer = dynamic(() => import("react-player"), { ssr: false }) as any
 type RoadmapModule = RoadmapRecord["roadmap"]["modules"][number];
 
 interface VideoSidebarData {
-  url?: string;   // optional – not every module has a video
+  url?: string;
   moduleIdx: number;
   moduleName: string;
   estimatedHours: number;
   schedule: string;
   topics: string[];
+  videoTitle?: string; // New: to store fetched YouTube title
 }
 
 export default function RoadmapPage({ params }: { params: Promise<{ id: string }> }) {
@@ -94,15 +95,38 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     return undefined;
   };
 
-  const openSidebar = (mIdx: number, mod: RoadmapModule) => {
+  const openSidebar = async (mIdx: number, mod: RoadmapModule) => {
+    const sanitized = sanitizeYoutubeUrl(mod.youtube_url);
+    
+    // 1. Sidebar'ı anında aç
     setSidebar({
-      url: sanitizeYoutubeUrl(mod.youtube_url),
+      url: sanitized,
       moduleIdx: mIdx,
       moduleName: mod.module_name,
       estimatedHours: mod.estimated_hours,
       schedule: mod.suggested_schedule,
       topics: mod.topics,
+      videoTitle: "Fetching video title..." // Artık kafa karıştırmaması için modül adını yazmıyoruz
     });
+
+    // 2. Arka planda orijinal YouTube başlığını çek
+    if (sanitized) {
+      try {
+        // Parametreleri (autoplay vb.) temizle, sadece ID kısmını al
+        const cleanUrl = sanitized.split('?')[0].replace("/embed/", "/watch?v=");
+        const res = await fetch(`https://noembed.com/embed?url=${cleanUrl}`);
+        const data = await res.json();
+        
+        if (data.title) {
+          setSidebar(prev => prev ? { ...prev, videoTitle: data.title } : null);
+        } else {
+          setSidebar(prev => prev ? { ...prev, videoTitle: "Video Lesson" } : null);
+        }
+      } catch (err) {
+        console.error("Video başlığı çekilemedi:", err);
+        setSidebar(prev => prev ? { ...prev, videoTitle: "Video Lesson" } : null);
+      }
+    }
   };
 
   const calcProgress = () => {
@@ -214,8 +238,11 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                   <PlaySquare className="w-5 h-5" style={{ color: "#ef4444" }} />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 15, lineHeight: 1.2 }}>Now Playing</div>
-                  <div style={{ fontSize: 12, color: "var(--navy-mid)" }}>Stage {sidebar.moduleIdx + 1}</div>
+                  <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, display: "flex", alignItems: "center", gap: 6, color: "var(--navy-mid)" }}>
+                    Now Playing <span style={{ color: "var(--border-clay)", fontWeight: 400 }}>|</span>
+                    <span style={{ color: "var(--navy)", fontWeight: 900 }}>{sidebar.moduleName}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--navy-mid)", opacity: 0.7 }}>Stage {sidebar.moduleIdx + 1}</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -276,11 +303,20 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               )}
 
-              {/* Module info */}
-              <div style={{ padding: "20px 22px", borderBottom: "2px solid rgba(51,47,58,0.1)" }}>
-                <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 10, lineHeight: 1.3 }}>
-                  {sidebar.moduleName}
-                </h3>
+              {/* Dynamic Video Title Header */}
+              {sidebar.url && (
+                <div style={{ padding: "24px 22px 12px", borderBottom: "1.5px solid rgba(51,47,58,0.05)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
+                    Official Lecture Video
+                  </div>
+                  <h3 style={{ fontSize: 18, fontWeight: 900, color: "var(--navy)", lineHeight: 1.3 }}>
+                    {sidebar.videoTitle || "Loading video details..."}
+                  </h3>
+                </div>
+              )}
+
+              {/* Module info – showing stats directly */}
+              <div style={{ padding: "16px 22px 24px" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <span className="pill" style={{ fontSize: 12 }}>
                     <Clock className="w-3.5 h-3.5" style={{ color: "#f59e0b" }} />
@@ -297,44 +333,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
 
-              {/* Topics checklist */}
-              <div style={{ padding: "16px 22px", flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--navy-mid)", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
-                  Topics in this stage
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sidebar.topics.map((topic, tIdx) => {
-                    const done = !!roadmap.progress[`${sidebar.moduleIdx}-${tIdx}`];
-                    return (
-                      <motion.div
-                        key={tIdx}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => toggleTopic(sidebar.moduleIdx, tIdx)}
-                        style={{
-                          display: "flex", alignItems: "flex-start", gap: 10,
-                          padding: "10px 14px", borderRadius: 14,
-                          background: done ? "#d1fae5" : "rgba(255,255,255,0.6)",
-                          border: `2px solid ${done ? "#10b981" : "var(--border-clay)"}`,
-                          cursor: "pointer", transition: "all 0.2s"
-                        }}
-                      >
-                        {done
-                          ? <CheckCircle className="w-5 h-5 mt-0.5 shrink-0" style={{ color: "#10b981" }} />
-                          : <Circle className="w-5 h-5 mt-0.5 shrink-0" style={{ color: "#94a3b8" }} />
-                        }
-                        <span style={{
-                          fontSize: 14, lineHeight: 1.5,
-                          textDecoration: done ? "line-through" : "none",
-                          color: done ? "#065f46" : "var(--navy)",
-                          fontWeight: done ? 400 : 500,
-                        }}>
-                          {topic}
-                        </span>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Topics checklist removed as per user request */}
             </div>
 
             {/* ── Sticky bottom: Mark stage done ── */}
@@ -521,32 +520,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                       style={{ overflow: "hidden" }}
                     >
                       <div style={{ padding: "0 24px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
-                        {/* Watch Video button → opens sidebar */}
-                        {hasVideo && (
-                          <motion.button
-                            whileTap={{ scale: 0.96 }}
-                            onClick={(e) => { e.stopPropagation(); openSidebar(mIdx, mod); }}
-                            style={{
-                              display: "inline-flex", alignItems: "center", gap: 8,
-                              padding: "10px 18px", borderRadius: 14, marginBottom: 4,
-                              background: "white", border: "2.5px solid var(--border-clay)",
-                              cursor: "pointer", fontWeight: 700, fontSize: 14,
-                              boxShadow: "3px 3px 0 var(--border-clay)",
-                              color: "#ef4444", width: "fit-content"
-                            }}
-                          >
-                            <div style={{
-                              width: 28, height: 28, borderRadius: 8, background: "#fee2e2",
-                              display: "flex", alignItems: "center", justifyContent: "center"
-                            }}>
-                              <Play className="w-3.5 h-3.5" fill="currentColor" />
-                            </div>
-                            Watch Video
-                            <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>→ opens in sidebar</span>
-                          </motion.button>
-                        )}
-
-                        {/* Topics */}
+                        {/* Topics – Now each one is a premium video-style button */}
                         {mod.topics.map((topic, tIdx) => {
                           const done = !!roadmap.progress[`${mIdx}-${tIdx}`];
                           return (
@@ -555,29 +529,54 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                               whileTap={{ scale: 0.98 }}
                               onClick={() => openSidebar(mIdx, mod)}
                               style={{
-                                display: "flex", alignItems: "flex-start", gap: 10,
-                                padding: "10px 14px", borderRadius: 12,
-                                background: done ? "rgba(209,250,229,0.8)" : "rgba(255,255,255,0.5)",
-                                border: `1.5px solid ${done ? "#10b981" : "var(--border-clay)"}`,
+                                display: "flex", alignItems: "center", gap: 12,
+                                padding: "14px 18px", borderRadius: 16,
+                                background: done ? "#d1fae5" : "white",
+                                border: `2.5px solid ${done ? "#10b981" : "var(--border-clay)"}`,
+                                boxShadow: done ? "none" : "4px 4px 0 var(--border-clay)",
                                 cursor: "pointer", transition: "all 0.2s"
                               }}
                             >
+                              {/* Checkbox circle */}
                               <div 
                                 onClick={(e) => { e.stopPropagation(); toggleTopic(mIdx, tIdx); }}
-                                style={{ display: "flex", marginTop: 2 }}
+                                style={{ display: "flex", flexShrink: 0 }}
                               >
                                 {done
-                                  ? <CheckCircle className="w-5 h-5 shrink-0" style={{ color: "#10b981" }} />
-                                  : <Circle className="w-5 h-5 shrink-0" style={{ color: "#94a3b8" }} />
+                                  ? <CheckCircle className="w-6 h-6" style={{ color: "#10b981" }} />
+                                  : <Circle className="w-6 h-6" style={{ color: "#cbd5e1" }} />
                                 }
                               </div>
-                              <span style={{
-                                fontSize: 14, lineHeight: 1.5,
-                                textDecoration: done ? "line-through" : "none",
-                                color: done ? "#065f46" : "var(--navy)",
-                                fontWeight: done ? 400 : 500
-                              }}>
-                                {topic}
+
+                              {/* Small Play Icon Design for each row */}
+                              {hasVideo && (
+                                <div style={{
+                                  width: 32, height: 32, borderRadius: 10, background: "#fee2e2",
+                                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+                                }}>
+                                  <Play className="w-4 h-4" fill="#ef4444" style={{ color: "#ef4444" }} />
+                                </div>
+                              )}
+
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {hasVideo && (
+                                  <div style={{ fontSize: 10, fontWeight: 800, color: "#ef4444", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: -1 }}>
+                                    YouTube Video
+                                  </div>
+                                )}
+                                <div style={{
+                                  fontSize: 15,
+                                  textDecoration: done ? "line-through" : "none",
+                                  color: done ? "#065f46" : "var(--navy)",
+                                  fontWeight: 700,
+                                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                                }}>
+                                  {topic}
+                                </div>
+                              </div>
+
+                              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>
+                                Play →
                               </span>
                             </motion.div>
                           );
