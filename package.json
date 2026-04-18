@@ -1,0 +1,14 @@
+{
+  "name": "ai-planner-root",
+  "version": "1.0.0",
+  "description": "Root workspace to start both frontend and backend concurrently.",
+  "scripts": {
+    "install:all": "npm install && cd frontend && npm install && echo '\n--- Kurulumlar tamamlandi ---'",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && source venv/bin/activate && uvicorn main:app --reload --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
