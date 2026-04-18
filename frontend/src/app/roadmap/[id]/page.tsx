@@ -18,14 +18,22 @@ const ReactPlayer = dynamic(() => import("react-player"), { ssr: false }) as any
 // ── Types ─────────────────────────────────────────────────────────────────
 type RoadmapModule = RoadmapRecord["roadmap"]["modules"][number];
 
+interface VideoChapter {
+  title: string;
+  time: string;
+  seconds: number;
+}
+
 interface VideoSidebarData {
   url?: string;
   moduleIdx: number;
+  topicIdx: number;   // New: Track specifically which topic is active
   moduleName: string;
   estimatedHours: number;
   schedule: string;
   topics: string[];
-  videoTitle?: string; // New: to store fetched YouTube title
+  videoTitle?: string;
+  chapters?: VideoChapter[]; // New: Real chapters extracted from YT description
 }
 
 export default function RoadmapPage({ params }: { params: Promise<{ id: string }> }) {
@@ -51,17 +59,15 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     setRoadmap({ ...roadmap, progress: updated });
   };
 
-  const markModuleDone = async (mIdx: number) => {
+  const markLessonDone = async (mIdx: number, tIdx: number) => {
     if (!roadmap) return;
-    const mod = roadmap.roadmap.modules[mIdx];
     const updated = { ...roadmap.progress };
-    mod.topics.forEach((_, tIdx) => {
-      updated[`${mIdx}-${tIdx}`] = true;
-    });
+    updated[`${mIdx}-${tIdx}`] = true; // Only mark the specific topic
+
     await db.roadmaps.update(roadmap.id!, { progress: updated });
     setRoadmap({ ...roadmap, progress: updated });
-    setModuleComplete(prev => ({ ...prev, [mIdx]: true }));
-    setTimeout(() => setSidebar(null), 700);
+    setModuleComplete(prev => ({ ...prev, [mIdx]: false })); // We don't mark whole module done yet
+    setTimeout(() => setSidebar(null), 500);
   };
 
   const toggleModule = (i: number) => {
@@ -72,15 +78,15 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
 
   const sanitizeYoutubeUrl = (url?: string) => {
     if (!url || typeof url !== 'string') return undefined;
-    
+
     // Improved regex to handle watch, embed, shorts, and youtu.be links
     const vidPattern = /(?:v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/;
     const vidMatch = url.match(vidPattern);
-    
+
     if (vidMatch && vidMatch[1]) {
       return `https://www.youtube.com/embed/${vidMatch[1]}?autoplay=1&rel=0`;
     }
-    
+
     // Extract playlist ID
     const listPattern = /[?&]list=([a-zA-Z0-9_-]+)/;
     const listMatch = url.match(listPattern);
@@ -95,38 +101,101 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     return undefined;
   };
 
-  const openSidebar = async (mIdx: number, mod: RoadmapModule) => {
+  const parseChapters = (description: string): VideoChapter[] => {
+    if (!description) return [];
+    const chapters: VideoChapter[] = [];
+    
+    // 'gm' flags are critical for multiline matching
+    const timeRegex = /(?:^|\s)\(?(\d{1,2}:)?(\d{1,2}):(\d{2})\)?\s*[-–—:]?\s*(.*)/gm;
+    let match;
+
+    while ((match = timeRegex.exec(description)) !== null) {
+      const h = match[1] ? parseInt(match[1].replace(':', '')) : 0;
+      const m = parseInt(match[2]);
+      const s = parseInt(match[3]);
+      const title = match[4].trim();
+      
+      if (title.length < 2) continue;
+
+      const totalSeconds = h * 3600 + m * 60 + s;
+      
+      chapters.push({
+        title,
+        time: `${match[1] || ""}${match[2]}:${match[3]}`,
+        seconds: totalSeconds
+      });
+    }
+
+    return chapters.filter((v, i, a) => a.findIndex(t => t.seconds === v.seconds) === i).sort((a,b) => a.seconds - b.seconds);
+  };
+
+  const openSidebar = async (mIdx: number, tIdx: number, mod: RoadmapModule) => {
     const sanitized = sanitizeYoutubeUrl(mod.youtube_url);
     
-    // 1. Sidebar'ı anında aç
+    // Sidebar'ı anında aç
     setSidebar({
       url: sanitized,
       moduleIdx: mIdx,
+      topicIdx: tIdx,
       moduleName: mod.module_name,
       estimatedHours: mod.estimated_hours,
       schedule: mod.suggested_schedule,
       topics: mod.topics,
-      videoTitle: "Fetching video title..." // Artık kafa karıştırmaması için modül adını yazmıyoruz
+      videoTitle: mod.topics[tIdx],
+      chapters: []
     });
 
-    // 2. Arka planda orijinal YouTube başlığını çek
+    console.log("--- Sidebar Debug Mode ---");
+    console.log("Video ID Identification:", sanitized?.split('/').pop()?.split('?')[0]);
+    console.log("API Key Status:", process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ? "✅ Detected" : "❌ NOT FOUND");
+
+    // 2. Arka planda orijinal YouTube verilerini çek
     if (sanitized) {
       try {
-        // Parametreleri (autoplay vb.) temizle, sadece ID kısmını al
-        const cleanUrl = sanitized.split('?')[0].replace("/embed/", "/watch?v=");
-        const res = await fetch(`https://noembed.com/embed?url=${cleanUrl}`);
-        const data = await res.json();
-        
-        if (data.title) {
-          setSidebar(prev => prev ? { ...prev, videoTitle: data.title } : null);
+        const videoId = sanitized.split('?')[0].split('/').pop();
+        const apiKey = process.env.NEXT_PUBLIC_YOUTUBE_API_KEY;
+
+        if (apiKey && videoId) {
+          console.log("Fetching from YouTube API v3...");
+          const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`);
+          const data = await res.json();
+          
+          if (data.items && data.items[0]) {
+            const snippet = data.items[0].snippet;
+            console.log("✅ Video Snippet received!");
+            console.log("Description sample:", snippet.description.substring(0, 100) + "...");
+            
+            const realChapters = parseChapters(snippet.description);
+            console.log("Final Chapters Found:", realChapters.length, realChapters);
+            
+            setSidebar(prev => prev ? { 
+              ...prev, 
+              videoTitle: snippet.title,
+              chapters: realChapters
+            } : null);
+          } else {
+            console.warn("⚠️ No video data found for this ID. Response:", data);
+          }
         } else {
-          setSidebar(prev => prev ? { ...prev, videoTitle: "Video Lesson" } : null);
+          console.warn("Falling back to noembed (No API Key or Video ID)");
+          const cleanUrl = sanitized.split('?')[0].replace("/embed/", "/watch?v=");
+          const res = await fetch(`https://noembed.com/embed?url=${cleanUrl}`);
+          const data = await res.json();
+          if (data.title) setSidebar(prev => prev ? { ...prev, videoTitle: data.title } : null);
         }
       } catch (err) {
-        console.error("Video başlığı çekilemedi:", err);
-        setSidebar(prev => prev ? { ...prev, videoTitle: "Video Lesson" } : null);
+        console.error("❌ Fatal Error Fetching Video Data:", err);
       }
     }
+    console.log("--------------------------");
+  };
+
+  const jumpToTime = (seconds: number) => {
+    if (!sidebar?.url) return;
+    // URL'deki mevcut start parametresini temizle ve yenisini ekle
+    const baseUrl = sidebar.url.split('?')[0];
+    const newUrl = `${baseUrl}?autoplay=1&start=${seconds}`;
+    setSidebar(prev => prev ? { ...prev, url: newUrl } : null);
   };
 
   const calcProgress = () => {
@@ -298,7 +367,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 }}>
                   <div style={{ fontSize: 36, marginBottom: 8 }}>📖</div>
                   <p style={{ fontSize: 14, color: "var(--navy-mid)", fontWeight: 500 }}>
-                    Bu ders metin tabanlıdır.<br/>Aşağıdan konuları tamamlayabilirsiniz.
+                    Bu ders metin tabanlıdır.<br />Aşağıdan konuları tamamlayabilirsiniz.
                   </p>
                 </div>
               )}
@@ -333,6 +402,46 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
 
+              {/* Real Video Chapters Section */}
+              {sidebar.url && sidebar.chapters && sidebar.chapters.length > 0 && (
+                <div style={{ padding: "0 22px 24px" }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "var(--navy-mid)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Clock className="w-4 h-4" style={{ color: "#ef4444" }} /> Video Highlights
+                  </div>
+                  <div style={{ 
+                    display: "flex", flexDirection: "column", gap: 6, 
+                    maxHeight: "340px", overflowY: "auto", paddingRight: 6,
+                    scrollbarWidth: "none" // Hide standard scrollbar for cleaner look
+                  }}>
+                    {sidebar.chapters.map((ch, i) => (
+                      <button
+                        key={i}
+                        onClick={() => jumpToTime(ch.seconds)}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                          padding: "10px 14px", borderRadius: 14, background: "white",
+                          border: "2.5px solid var(--border-clay)", cursor: "pointer",
+                          transition: "all 0.2s", textAlign: "left",
+                          boxShadow: "2px 2px 0 var(--border-clay)"
+                        }}
+                        className="chapter-btn"
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {ch.title}
+                        </span>
+                        <span style={{ 
+                          fontSize: 11, color: "#ef4444", fontWeight: 800, 
+                          background: "#fee2e2", padding: "2px 8px", borderRadius: 8,
+                          flexShrink: 0, border: "1.5px solid #fca5a5"
+                        }}>
+                          {ch.time}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Topics checklist removed as per user request */}
             </div>
 
@@ -366,7 +475,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => markModuleDone(sidebar.moduleIdx)}
+                    onClick={() => markLessonDone(sidebar.moduleIdx, sidebar.topicIdx)}
                     className="btn-clay btn-green"
                     style={{
                       width: "100%", justifyContent: "center",
@@ -374,12 +483,12 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                     }}
                   >
                     <CheckCheck className="w-5 h-5" />
-                    Mark Stage as Complete
+                    Mark Lesson as Complete
                   </motion.button>
                 )}
               </AnimatePresence>
               <p style={{ textAlign: "center", fontSize: 12, color: "var(--navy-mid)", marginTop: 8 }}>
-                This will check off all {sidebar.topics.length} topics in this stage.
+                This will check off only this specific video in your progress.
               </p>
             </div>
           </motion.aside>
@@ -527,7 +636,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                             <motion.div
                               key={tIdx}
                               whileTap={{ scale: 0.98 }}
-                              onClick={() => openSidebar(mIdx, mod)}
+                              onClick={() => openSidebar(mIdx, tIdx, mod)}
                               style={{
                                 display: "flex", alignItems: "center", gap: 12,
                                 padding: "14px 18px", borderRadius: 16,
@@ -538,7 +647,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                               }}
                             >
                               {/* Checkbox circle */}
-                              <div 
+                              <div
                                 onClick={(e) => { e.stopPropagation(); toggleTopic(mIdx, tIdx); }}
                                 style={{ display: "flex", flexShrink: 0 }}
                               >
