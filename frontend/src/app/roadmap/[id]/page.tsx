@@ -72,21 +72,25 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
   const sanitizeYoutubeUrl = (url?: string) => {
     if (!url || typeof url !== 'string') return undefined;
     
-    // Extract standard 11-char video ID
-    const vidPattern = /(?:v=|youtu\.be\/|\/embed\/|\/v\/|\/watch\?v=)([a-zA-Z0-9_-]{11})/;
+    // Improved regex to handle watch, embed, shorts, and youtu.be links
+    const vidPattern = /(?:v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/;
     const vidMatch = url.match(vidPattern);
+    
     if (vidMatch && vidMatch[1]) {
-      return `https://www.youtube.com/watch?v=${vidMatch[1]}`;
+      return `https://www.youtube.com/embed/${vidMatch[1]}?autoplay=1&rel=0`;
     }
     
-    // Extract playlist ID if no single video is found
+    // Extract playlist ID
     const listPattern = /[?&]list=([a-zA-Z0-9_-]+)/;
     const listMatch = url.match(listPattern);
     if (listMatch && listMatch[1]) {
-      return `https://www.youtube.com/playlist?list=${listMatch[1]}`;
+      return `https://www.youtube.com/embed/videoseries?list=${listMatch[1]}&autoplay=1`;
     }
 
-    // If we didn't find a video ID or playlist ID, consider it invalid.
+    // fallback: if it's already a valid look-alike URL but doesn't match our pattern, 
+    // we still try to return it if it contains youtube
+    if (url.includes('youtube.com') || url.includes('youtu.be')) return url;
+
     return undefined;
   };
 
@@ -248,15 +252,15 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
             {/* Scrollable body */}
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
-              {/* Video embed – only shown when URL exists */}
+              {/* Video embed – simplified to native iframe for guaranteed YouTube appearance */}
               {sidebar.url ? (
                 <div style={{ position: "relative", paddingTop: "56.25%", background: "#000", borderBottom: "2.5px solid var(--border-clay)" }}>
-                  <ReactPlayer
-                    url={sidebar.url}
-                    controls
-                    width="100%"
-                    height="100%"
-                    style={{ position: "absolute", top: 0, left: 0 }}
+                  <iframe
+                    src={sidebar.url}
+                    style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    title="YouTube video player"
                   />
                 </div>
               ) : (
