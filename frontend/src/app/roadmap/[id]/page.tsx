@@ -27,13 +27,15 @@ interface VideoChapter {
 interface VideoSidebarData {
   url?: string;
   moduleIdx: number;
-  topicIdx: number;   // New: Track specifically which topic is active
+  topicIdx: number;
   moduleName: string;
   estimatedHours: number;
   schedule: string;
   topics: string[];
   videoTitle?: string;
-  chapters?: VideoChapter[]; // New: Real chapters extracted from YT description
+  chapters?: VideoChapter[];
+  duration?: string;   // New: Real video duration
+  viewCount?: string;  // New: Real view count
 }
 
 export default function RoadmapPage({ params }: { params: Promise<{ id: string }> }) {
@@ -101,6 +103,26 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     return undefined;
   };
 
+  const formatDuration = (isoDuration: string) => {
+    const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!match) return "00:00";
+    const hours = (parseInt(match[1]) || 0);
+    const minutes = (parseInt(match[2]) || 0);
+    const seconds = (parseInt(match[3]) || 0);
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const formatViews = (views: string) => {
+    const count = parseInt(views);
+    if (count >= 1000000) return (count / 1000000).toFixed(1) + "M views";
+    if (count >= 1000) return (count / 1000).toFixed(1) + "K views";
+    return count + " views";
+  };
+
   const parseChapters = (description: string): VideoChapter[] => {
     if (!description) return [];
     const chapters: VideoChapter[] = [];
@@ -132,7 +154,6 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
   const openSidebar = async (mIdx: number, tIdx: number, mod: RoadmapModule) => {
     const sanitized = sanitizeYoutubeUrl(mod.youtube_url);
     
-    // Sidebar'ı anında aç
     setSidebar({
       url: sanitized,
       moduleIdx: mIdx,
@@ -145,49 +166,40 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
       chapters: []
     });
 
-    console.log("--- Sidebar Debug Mode ---");
-    console.log("Video ID Identification:", sanitized?.split('/').pop()?.split('?')[0]);
-    console.log("API Key Status:", process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ? "✅ Detected" : "❌ NOT FOUND");
-
-    // 2. Arka planda orijinal YouTube verilerini çek
     if (sanitized) {
       try {
         const videoId = sanitized.split('?')[0].split('/').pop();
         const apiKey = process.env.NEXT_PUBLIC_YOUTUBE_API_KEY;
 
         if (apiKey && videoId) {
-          console.log("Fetching from YouTube API v3...");
-          const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`);
+          const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoId}&key=${apiKey}`);
           const data = await res.json();
           
           if (data.items && data.items[0]) {
-            const snippet = data.items[0].snippet;
-            console.log("✅ Video Snippet received!");
-            console.log("Description sample:", snippet.description.substring(0, 100) + "...");
+            const item = data.items[0];
+            const snippet = item.snippet;
+            const contentDetails = item.contentDetails;
+            const statistics = item.statistics;
             
             const realChapters = parseChapters(snippet.description);
-            console.log("Final Chapters Found:", realChapters.length, realChapters);
-            
             setSidebar(prev => prev ? { 
               ...prev, 
               videoTitle: snippet.title,
-              chapters: realChapters
+              chapters: realChapters,
+              duration: formatDuration(contentDetails.duration),
+              viewCount: formatViews(statistics.viewCount)
             } : null);
-          } else {
-            console.warn("⚠️ No video data found for this ID. Response:", data);
           }
         } else {
-          console.warn("Falling back to noembed (No API Key or Video ID)");
           const cleanUrl = sanitized.split('?')[0].replace("/embed/", "/watch?v=");
           const res = await fetch(`https://noembed.com/embed?url=${cleanUrl}`);
           const data = await res.json();
           if (data.title) setSidebar(prev => prev ? { ...prev, videoTitle: data.title } : null);
         }
       } catch (err) {
-        console.error("❌ Fatal Error Fetching Video Data:", err);
+        console.error("Video verisi çekilemedi:", err);
       }
     }
-    console.log("--------------------------");
   };
 
   const jumpToTime = (seconds: number) => {
@@ -315,22 +327,6 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {sidebar.url && (
-                  <a
-                    href={sidebar.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Open in YouTube"
-                    style={{
-                      width: 32, height: 32, borderRadius: 8, background: "white",
-                      border: "2px solid var(--border-clay)", display: "flex",
-                      alignItems: "center", justifyContent: "center",
-                      boxShadow: "2px 2px 0 var(--border-clay)", cursor: "pointer", color: "var(--navy)"
-                    }}
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                )}
                 <button
                   onClick={() => setSidebar(null)}
                   style={{
@@ -384,20 +380,18 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               )}
 
-              {/* Module info – showing stats directly */}
+              {/* Module info – Dynamic YouTube Stats */}
               <div style={{ padding: "16px 22px 24px" }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <span className="pill" style={{ fontSize: 12 }}>
-                    <Clock className="w-3.5 h-3.5" style={{ color: "#f59e0b" }} />
-                    {sidebar.estimatedHours}h estimated
-                  </span>
-                  <span className="pill" style={{ fontSize: 12 }}>
+                  {sidebar.duration && (
+                    <span className="pill" style={{ fontSize: 12, background: "#fff", borderColor: "var(--border-clay)" }}>
+                      <Clock className="w-3.5 h-3.5" style={{ color: "#ef4444" }} />
+                      {sidebar.duration} Lesson
+                    </span>
+                  )}
+                  <span className="pill" style={{ fontSize: 12, background: "#fff", borderColor: "var(--border-clay)" }}>
                     <CalendarDays className="w-3.5 h-3.5" style={{ color: "#10b981" }} />
                     {sidebar.schedule}
-                  </span>
-                  <span className="pill" style={{ fontSize: 12 }}>
-                    <CheckCircle className="w-3.5 h-3.5" style={{ color: "#a78bfa" }} />
-                    {sidebarTopicsDone}/{sidebar.topics.length} topics done
                   </span>
                 </div>
               </div>
