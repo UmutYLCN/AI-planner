@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X, UploadCloud, PlaySquare, Plus, Loader2,
   FileText, ArrowRight, BookOpen, CalendarDays,
+  Settings, Layers, ListChecks
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { useRouter } from "next/navigation";
@@ -18,6 +19,8 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [youtubeUrls, setYoutubeUrls] = useState<string[]>([""]);
   const [targetDate, setTargetDate] = useState("");
+  const [strictMode, setStrictMode] = useState(true);
+  const [granularity, setGranularity] = useState("macro");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("Analyzing your materials...");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,6 +60,8 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
       pdfFiles.forEach(f => formData.append("files", f));
       formData.append("youtube_urls", JSON.stringify(validUrls));
       if (targetDate) formData.append("target_date", targetDate);
+      formData.append("strict_mode", strictMode.toString());
+      formData.append("granularity", granularity);
 
       const res = await fetch("http://localhost:8000/api/plan", {
         method: "POST",
@@ -242,6 +247,58 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
               >
                 <Plus className="w-4 h-4" /> Add another link
               </button>
+            </div>
+          </div>
+
+          {/* ── Plan Settings ── */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+              <Settings className="w-3.5 h-3.5" /> Plan Settings
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="clay-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, background: "white" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <ListChecks className="w-4 h-4" style={{ color: "#3b82f6" }} /> 
+                    Include All Content
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Force AI to include every video without skipping</div>
+                </div>
+                <button 
+                  onClick={() => setStrictMode(!strictMode)}
+                  style={{
+                    background: strictMode ? "var(--green)" : "#e2e8f0",
+                    border: "none", cursor: "pointer", width: 44, height: 24, borderRadius: 12,
+                    display: "flex", alignItems: "center", padding: 2,
+                    justifyContent: strictMode ? "flex-end" : "flex-start",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  <div style={{ width: 20, height: 20, background: "white", borderRadius: "50%", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }} />
+                </button>
+              </div>
+
+              <div className="clay-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, background: "white" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Layers className="w-4 h-4" style={{ color: "#8b5cf6" }} /> 
+                    Generate Sub-Tasks
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Break down materials into smaller, actionable steps</div>
+                </div>
+                <button 
+                  onClick={() => setGranularity(g => g === "macro" ? "micro" : "macro")}
+                  style={{
+                    background: granularity === "micro" ? "var(--green)" : "#e2e8f0",
+                    border: "none", cursor: "pointer", width: 44, height: 24, borderRadius: 12,
+                    display: "flex", alignItems: "center", padding: 2,
+                    justifyContent: granularity === "micro" ? "flex-end" : "flex-start",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  <div style={{ width: 20, height: 20, background: "white", borderRadius: "50%", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }} />
+                </button>
+              </div>
             </div>
           </div>
 

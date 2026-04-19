@@ -33,6 +33,8 @@ async def generate_plan(
     files: Optional[List[UploadFile]] = File(default=[]),
     youtube_urls: Optional[str] = Form(default="[]"),
     target_date: Optional[str] = Form(default=None),   # stored, not used for scheduling yet
+    strict_mode: str = Form(default="true"),
+    granularity: str = Form(default="macro"),
 ):
     pdf_service = PDFService()
     yt_service = YouTubeService()
@@ -129,7 +131,8 @@ async def generate_plan(
 
     # ── 5. Generate roadmap ───────────────────────────────────────────────
     try:
-        roadmap = planner_service.generate_roadmap(materials_summary, target_date)
+        is_strict = strict_mode.lower() == "true"
+        roadmap = planner_service.generate_roadmap(materials_summary, target_date, is_strict, granularity)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
 
