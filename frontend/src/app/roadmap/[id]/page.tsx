@@ -1,21 +1,19 @@
 "use client";
 import { useEffect, useState } from "react";
 import { use } from "react";
-import { db, RoadmapRecord, DayResource } from "@/lib/db";
+import { db, RoadmapRecord, RoadmapResource } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  BookOpen, Clock, CalendarDays, ArrowLeft, CheckCircle, Circle,
+  BookOpen, Clock, ArrowLeft, CheckCircle, Circle,
   Play, BarChart2, X, PlaySquare, CheckCheck, FileText, ChevronRight
 } from "lucide-react";
 import Link from "next/link";
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Sidebar state type ──────────────────────────────────────────────────────
 interface SidebarData {
-  dayIdx: number;
   resIdx: number;
-  resource: DayResource;
+  resource: RoadmapResource;
   resolvedPdfUrl?: string;
-  // Video metadata
   videoTitle?: string;
   duration?: string;
   chapters?: { title: string; time: string; seconds: number }[];
@@ -28,28 +26,26 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    db.roadmaps.get(parseInt(id)).then((r) => {
+    db.roadmaps.get(parseInt(id)).then(r => {
       if (r) setRoadmap(r);
       setLoading(false);
     });
   }, [id]);
 
-  // ── Progress helpers ───────────────────────────────────────────────────────
-  const isDone = (dayIdx: number, resIdx: number) =>
-    !!roadmap?.progress[`${dayIdx}-${resIdx}`];
+  // ── Progress ──────────────────────────────────────────────────────────────
+  const isDone = (idx: number) => !!roadmap?.progress[`${idx}`];
 
-  const toggleDone = async (dayIdx: number, resIdx: number) => {
+  const toggleDone = async (idx: number) => {
     if (!roadmap) return;
-    const key = `${dayIdx}-${resIdx}`;
+    const key = `${idx}`;
     const updated = { ...roadmap.progress, [key]: !roadmap.progress[key] };
     await db.roadmaps.update(roadmap.id!, { progress: updated });
     setRoadmap({ ...roadmap, progress: updated });
   };
 
-  const markDone = async (dayIdx: number, resIdx: number) => {
+  const markDone = async (idx: number) => {
     if (!roadmap) return;
-    const key = `${dayIdx}-${resIdx}`;
-    const updated = { ...roadmap.progress, [key]: true };
+    const updated = { ...roadmap.progress, [`${idx}`]: true };
     await db.roadmaps.update(roadmap.id!, { progress: updated });
     setRoadmap({ ...roadmap, progress: updated });
     setTimeout(() => setSidebar(null), 400);
@@ -57,17 +53,16 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
 
   const calcProgress = () => {
     if (!roadmap) return 0;
-    const total = (roadmap.roadmap.days ?? []).reduce((a, d) => a + d.resources.length, 0);
-    if (!total) return 0;
-    const done = Object.values(roadmap.progress).filter(Boolean).length;
-    return Math.round((done / total) * 100);
+    const resources = roadmap.roadmap.resources ?? [];
+    if (!resources.length) return 0;
+    const done = resources.filter((_, i) => isDone(i)).length;
+    return Math.round((done / resources.length) * 100);
   };
 
-  // ── URL helpers ────────────────────────────────────────────────────────────
+  // ── URL helpers ───────────────────────────────────────────────────────────
   const sanitizeYoutubeUrl = (url?: string) => {
-    if (!url || typeof url !== "string") return undefined;
-    const vidPattern = /(?:v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/;
-    const vidMatch = url.match(vidPattern);
+    if (!url) return undefined;
+    const vidMatch = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
     if (vidMatch?.[1]) return `https://www.youtube.com/embed/${vidMatch[1]}?autoplay=1&rel=0`;
     const listMatch = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
     if (listMatch?.[1]) return `https://www.youtube.com/embed/videoseries?list=${listMatch[1]}&autoplay=1`;
@@ -78,7 +73,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
     if (!m) return "";
     const h = parseInt(m[1]) || 0, min = parseInt(m[2]) || 0, s = parseInt(m[3]) || 0;
-    return h > 0 ? `${h}:${min.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}` : `${min}:${s.toString().padStart(2, "0")}`;
+    return h > 0 ? `${h}:${String(min).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${min}:${String(s).padStart(2, "0")}`;
   };
 
   const parseChapters = (desc: string) => {
@@ -95,18 +90,16 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     return results.filter((v, i, a) => a.findIndex(t => t.seconds === v.seconds) === i).sort((a, b) => a.seconds - b.seconds);
   };
 
-  // ── Open Sidebar ───────────────────────────────────────────────────────────
-  const openSidebar = async (dayIdx: number, resIdx: number, resource: DayResource) => {
-    // Resolve PDF blob if available
+  // ── Open sidebar ──────────────────────────────────────────────────────────
+  const openSidebar = async (resIdx: number, resource: RoadmapResource) => {
     let resolvedPdfUrl: string | undefined;
     if (resource.type === "pdf" && resource.pdf_name && roadmap?.attachedFiles) {
       const file = roadmap.attachedFiles.find(f => f.name === resource.pdf_name);
       if (file) resolvedPdfUrl = URL.createObjectURL(file.data);
     }
 
-    setSidebar({ dayIdx, resIdx, resource, resolvedPdfUrl });
+    setSidebar({ resIdx, resource, resolvedPdfUrl });
 
-    // Fetch YouTube metadata
     if (resource.type === "video" && resource.youtube_url) {
       const sanitized = sanitizeYoutubeUrl(resource.youtube_url);
       if (!sanitized) return;
@@ -135,20 +128,18 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
     const sanitized = sanitizeYoutubeUrl(sidebar.resource.youtube_url);
     if (!sanitized) return;
     const base = sanitized.split("?")[0];
-    setSidebar(prev => prev ? { ...prev, resource: { ...prev.resource, youtube_url: `${base}?autoplay=1&start=${seconds}` } } : null);
+    setSidebar(prev => prev ? {
+      ...prev, resource: { ...prev.resource, youtube_url: `${base}?autoplay=1&start=${seconds}` }
+    } : null);
   };
 
-  // ── Color palette (for day cards) ─────────────────────────────────────────
-  const DAY_COLORS = [
-    { bg: "clay-card-blue",   pill: "#60a5fa", pillBg: "#dbeafe" },
-    { bg: "clay-card-purple", pill: "#a78bfa", pillBg: "#ede9fe" },
-    { bg: "clay-card-orange", pill: "#fb923c", pillBg: "#ffedd5" },
-    { bg: "clay-card-pink",   pill: "#f472b6", pillBg: "#fce7f3" },
-    { bg: "clay-card-yellow", pill: "#eab308", pillBg: "#fef9c3" },
-    { bg: "clay-card-green",  pill: "#10b981", pillBg: "#d1fae5" },
+  // ── Resource colors ───────────────────────────────────────────────────────
+  const RESOURCE_COLORS = [
+    "#60a5fa", "#a78bfa", "#fb923c", "#f472b6",
+    "#eab308", "#10b981", "#38bdf8", "#f87171",
   ];
 
-  // ── Loading / Not found ────────────────────────────────────────────────────
+  // ── Loading / Not found ───────────────────────────────────────────────────
   if (loading) return (
     <div style={{ background: "var(--cream)", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
@@ -169,12 +160,12 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
   );
 
   const pct = calcProgress();
-  const days = roadmap.roadmap.days ?? [];
+  const resources = roadmap.roadmap.resources ?? [];
 
   return (
     <div style={{ background: "var(--cream)", minHeight: "100vh", position: "relative" }}>
 
-      {/* ── Sidebar backdrop ─────────────────────────────────────────────── */}
+      {/* ── Backdrop ─────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {sidebar && (
           <motion.div
@@ -186,7 +177,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
         )}
       </AnimatePresence>
 
-      {/* ── Right Sidebar ────────────────────────────────────────────────── */}
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {sidebar && (
           <motion.aside
@@ -201,7 +192,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
               display: "flex", flexDirection: "column", overflow: "hidden",
             }}
           >
-            {/* Sidebar header */}
+            {/* Header */}
             <div style={{
               padding: "18px 22px", borderBottom: "2.5px solid var(--border-clay)",
               background: "rgba(255,255,255,0.8)", backdropFilter: "blur(12px)",
@@ -224,20 +215,14 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                     {sidebar.resource.title}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--navy-mid)", opacity: 0.7, marginTop: 2 }}>
-                    Day {sidebar.dayIdx + 1}
-                    {sidebar.resource.type === "pdf" && sidebar.resource.page_range && ` · ${sidebar.resource.page_range}`}
+                    #{sidebar.resIdx + 1} · {sidebar.resource.type === "pdf" ? "PDF Study" : "Video"}
                     {sidebar.duration && ` · ${sidebar.duration}`}
                   </div>
                 </div>
               </div>
               <button
                 onClick={() => setSidebar(null)}
-                style={{
-                  width: 32, height: 32, borderRadius: 8, background: "white",
-                  border: "2px solid var(--border-clay)", display: "flex",
-                  alignItems: "center", justifyContent: "center",
-                  boxShadow: "2px 2px 0 var(--border-clay)", cursor: "pointer", color: "var(--navy)", flexShrink: 0,
-                }}
+                style={{ width: 32, height: 32, borderRadius: 8, background: "white", border: "2px solid var(--border-clay)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "2px 2px 0 var(--border-clay)", cursor: "pointer" }}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -246,15 +231,14 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
             {/* Scrollable body */}
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
-              {/* ── Top view: video player OR pdf viewer ── */}
-              {(sidebar.resource.type === "video" && sidebar.resource.youtube_url) ? (
+              {/* Viewer */}
+              {sidebar.resource.type === "video" && sidebar.resource.youtube_url ? (
                 <div style={{ position: "relative", paddingTop: "56.25%", background: "#000", borderBottom: "2.5px solid var(--border-clay)", flexShrink: 0 }}>
                   <iframe
                     src={sanitizeYoutubeUrl(sidebar.resource.youtube_url)}
                     style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    title="video"
+                    allowFullScreen title="video"
                   />
                 </div>
               ) : sidebar.resolvedPdfUrl ? (
@@ -266,17 +250,16 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                   />
                 </div>
               ) : sidebar.resource.type === "pdf" ? (
-                /* PDF not locally attached — info state */
                 <div style={{ padding: "32px 22px", textAlign: "center", borderBottom: "2px solid rgba(51,47,58,0.08)", background: "rgba(255,255,255,0.5)", flexShrink: 0 }}>
                   <div style={{ width: 64, height: 64, borderRadius: 18, background: "#d1fae5", border: "2px solid var(--border-clay)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
                     <FileText className="w-8 h-8" style={{ color: "#059669" }} />
                   </div>
                   <p style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>{sidebar.resource.pdf_name}</p>
-                  <p style={{ fontSize: 13, color: "#64748b" }}>{sidebar.resource.page_range ?? "Open your local file to study."}</p>
+                  <p style={{ fontSize: 13, color: "#64748b" }}>Open your local PDF file to study.</p>
                 </div>
               ) : null}
 
-              {/* ── Video title (only for videos) ── */}
+              {/* Video title */}
               {sidebar.resource.type === "video" && sidebar.videoTitle && (
                 <div style={{ padding: "18px 22px 0", borderBottom: "1px solid rgba(51,47,58,0.06)" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>YouTube</div>
@@ -284,12 +267,12 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               )}
 
-              {/* ── Topics to cover ── */}
-              {sidebar.resource.topics.length > 0 && (
+              {/* Topics */}
+              {sidebar.resource.topics?.length > 0 && (
                 <div style={{ padding: "20px 22px 8px" }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: "var(--navy-mid)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
                     {sidebar.resource.type === "pdf" ? <BookOpen className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                    {sidebar.resource.type === "pdf" ? "Topics in this section" : "What you'll learn"}
+                    {sidebar.resource.type === "pdf" ? "Topics in this PDF" : "What you'll learn"}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {sidebar.resource.topics.map((topic, i) => (
@@ -300,8 +283,10 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                         boxShadow: "2px 2px 0 var(--border-clay)",
                       }}>
                         <span style={{
-                          width: 20, height: 20, borderRadius: 6, background: sidebar.resource.type === "pdf" ? "#d1fae5" : "#fee2e2",
-                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1, fontSize: 10, fontWeight: 800,
+                          width: 20, height: 20, borderRadius: 6,
+                          background: sidebar.resource.type === "pdf" ? "#d1fae5" : "#fee2e2",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0, fontSize: 10, fontWeight: 800,
                           color: sidebar.resource.type === "pdf" ? "#059669" : "#ef4444",
                         }}>{i + 1}</span>
                         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", lineHeight: 1.45 }}>{topic}</span>
@@ -311,24 +296,20 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
                 </div>
               )}
 
-              {/* ── Video chapters ── */}
+              {/* Chapters */}
               {sidebar.resource.type === "video" && sidebar.chapters && sidebar.chapters.length > 0 && (
                 <div style={{ padding: "16px 22px 24px" }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: "var(--navy-mid)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                    <Clock className="w-3.5 h-3.5" style={{ color: "#ef4444" }} /> Video Chapters
+                    <Clock className="w-3.5 h-3.5" style={{ color: "#ef4444" }} /> Chapters
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
                     {sidebar.chapters.map((ch, i) => (
-                      <button
-                        key={i}
-                        onClick={() => jumpToChapter(ch.seconds)}
-                        style={{
-                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-                          padding: "9px 14px", borderRadius: 12, background: "white",
-                          border: "1.5px solid var(--border-clay)", cursor: "pointer",
-                          boxShadow: "2px 2px 0 var(--border-clay)", textAlign: "left",
-                        }}
-                      >
+                      <button key={i} onClick={() => jumpToChapter(ch.seconds)} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                        padding: "9px 14px", borderRadius: 12, background: "white",
+                        border: "1.5px solid var(--border-clay)", cursor: "pointer",
+                        boxShadow: "2px 2px 0 var(--border-clay)", textAlign: "left",
+                      }}>
                         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.title}</span>
                         <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 800, background: "#fee2e2", padding: "2px 8px", borderRadius: 8, flexShrink: 0 }}>{ch.time}</span>
                       </button>
@@ -338,16 +319,16 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
               )}
             </div>
 
-            {/* ── Sticky footer: mark done ── */}
+            {/* Footer: mark done */}
             <div style={{ padding: "16px 22px", borderTop: "2.5px solid var(--border-clay)", background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)" }}>
-              {isDone(sidebar.dayIdx, sidebar.resIdx) ? (
+              {isDone(sidebar.resIdx) ? (
                 <div style={{ textAlign: "center", padding: "12px", background: "#d1fae5", borderRadius: 14, border: "2px solid #10b981", fontWeight: 800, color: "#065f46", fontSize: 15 }}>
                   ✅ Completed!
                 </div>
               ) : (
                 <motion.button
                   whileTap={{ scale: 0.97 }}
-                  onClick={() => markDone(sidebar.dayIdx, sidebar.resIdx)}
+                  onClick={() => markDone(sidebar.resIdx)}
                   className="btn-clay btn-green"
                   style={{ width: "100%", justifyContent: "center", fontSize: 15, padding: "13px 20px", borderRadius: 14 }}
                 >
@@ -372,171 +353,132 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
         </Link>
       </nav>
 
-      <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px 80px" }}>
+      <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 24px 80px" }}>
 
-        {/* ── Header card ─────────────────────────────────────────────────── */}
-        <div className="clay-card" style={{ padding: 32, borderRadius: 26, marginBottom: 32 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-            <h1 style={{ fontSize: 28, fontWeight: 800, maxWidth: "75%", lineHeight: 1.2 }}>{roadmap.roadmap.title}</h1>
-            <span className={`pill ${pct === 100 ? "pill-green" : ""}`}>{pct === 100 ? "✅ Completed!" : `${pct}% done`}</span>
+        {/* ── Header ───────────────────────────────────────────────────── */}
+        <div className="clay-card" style={{ padding: 28, borderRadius: 24, marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+            <h1 style={{ fontSize: 26, fontWeight: 800, maxWidth: "75%", lineHeight: 1.25 }}>{roadmap.roadmap.title}</h1>
+            <span className={`pill ${pct === 100 ? "pill-green" : ""}`}>{pct === 100 ? "✅ Done!" : `${pct}% done`}</span>
           </div>
 
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 20 }}>
-            <span style={{ fontSize: 14, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
+            <span style={{ fontSize: 13, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
               <Clock className="w-4 h-4" style={{ color: "#f59e0b" }} />{roadmap.roadmap.total_estimated_hours}h total
             </span>
-            <span style={{ fontSize: 14, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
-              <BarChart2 className="w-4 h-4" style={{ color: "#3b82f6" }} />{roadmap.roadmap.recommended_daily_hours}h / day
+            <span style={{ fontSize: 13, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
+              <BarChart2 className="w-4 h-4" style={{ color: "#3b82f6" }} />{resources.length} resources
             </span>
-            <span style={{ fontSize: 14, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
-              <CalendarDays className="w-4 h-4" style={{ color: "#10b981" }} />Finish by {roadmap.roadmap.estimated_finish_date}
-            </span>
+            {roadmap.target_date && (
+              <span style={{ fontSize: 13, color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
+                <ArrowLeft className="w-4 h-4" style={{ color: "#10b981", transform: "rotate(180deg)" }} />
+                Target: {roadmap.target_date}
+              </span>
+            )}
           </div>
 
           {/* Progress bar */}
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13, fontWeight: 600 }}>
-              <span>Overall Progress</span>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12, fontWeight: 700 }}>
+              <span style={{ color: "var(--navy-mid)" }}>Progress</span>
               <span style={{ color: pct === 100 ? "var(--green-dark)" : "var(--navy)" }}>{pct}%</span>
             </div>
-            <div className="progress-track" style={{ height: 14 }}>
+            <div className="progress-track" style={{ height: 12 }}>
               <motion.div className="progress-fill" initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6 }} />
             </div>
           </div>
         </div>
 
-        {/* ── Day cards list ─────────────────────────────────────────────── */}
-        {days.length === 0 ? (
+        {/* ── Resource list ─────────────────────────────────────────────── */}
+        {resources.length === 0 ? (
           <div className="clay-card clay-card-orange" style={{ padding: 48, borderRadius: 24, textAlign: "center" }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🗓️</div>
-            <h2 style={{ fontWeight: 800 }}>No schedule generated</h2>
-            <p style={{ color: "#64748b", marginTop: 8 }}>Try creating a new roadmap with the updated system.</p>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📭</div>
+            <h2 style={{ fontWeight: 800 }}>No resources yet</h2>
+            <p style={{ color: "#64748b", marginTop: 8 }}>Create a new roadmap to see content here.</p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {days.map((day, dayIdx) => {
-              const { bg, pill: pillColor, pillBg } = DAY_COLORS[dayIdx % DAY_COLORS.length];
-              const totalRes = day.resources.length;
-              const doneCount = day.resources.filter((_, rIdx) => isDone(dayIdx, rIdx)).length;
-              const dayPct = totalRes > 0 ? Math.round((doneCount / totalRes) * 100) : 0;
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {resources.map((res, i) => {
+              const done = isDone(i);
+              const isPdf = res.type === "pdf";
+              const accent = RESOURCE_COLORS[i % RESOURCE_COLORS.length];
+              const typeColor = isPdf ? "#059669" : "#ef4444";
+              const typeBg = isPdf ? "#d1fae5" : "#fee2e2";
 
               return (
                 <motion.div
-                  key={dayIdx}
-                  initial={{ opacity: 0, y: 12 }}
+                  key={i}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: dayIdx * 0.04 }}
-                  className={`clay-card ${bg}`}
-                  style={{ borderRadius: 20, overflow: "hidden" }}
+                  transition={{ delay: i * 0.025 }}
+                  whileTap={{ scale: 0.99 }}
+                  onClick={() => openSidebar(i, res)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14,
+                    padding: "14px 18px", borderRadius: 16,
+                    background: done ? "#f0fdf4" : "white",
+                    border: `2.5px solid ${done ? "#10b981" : "var(--border-clay)"}`,
+                    boxShadow: done ? "none" : "4px 4px 0 var(--border-clay)",
+                    cursor: "pointer", transition: "all 0.18s",
+                  }}
                 >
-                  {/* Day header */}
-                  <div style={{ padding: "18px 22px 14px", display: "flex", alignItems: "center", gap: 14 }}>
-                    {/* Day number badge */}
-                    <div style={{
-                      width: 44, height: 44, borderRadius: 13, background: "white",
-                      border: "2.5px solid var(--border-clay)", flexShrink: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontWeight: 900, fontSize: 16, color: pillColor,
-                      boxShadow: "3px 3px 0 var(--border-clay)",
-                    }}>
-                      {dayPct === 100 ? "✓" : dayIdx + 1}
-                    </div>
-
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: "var(--navy)" }}>Day {day.day}</div>
-                      <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
-                        {day.total_hours}h · {doneCount}/{totalRes} done
-                      </div>
-                    </div>
-
-                    {/* Progress chip */}
-                    <div style={{
-                      padding: "4px 12px", borderRadius: 100,
-                      background: dayPct === 100 ? "#d1fae5" : "rgba(255,255,255,0.6)",
-                      border: `1.5px solid ${dayPct === 100 ? "#10b981" : "var(--border-clay)"}`,
-                      fontSize: 12, fontWeight: 700,
-                      color: dayPct === 100 ? "#059669" : "var(--navy)",
-                    }}>
-                      {dayPct}%
-                    </div>
+                  {/* Order badge */}
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 10, background: done ? "#d1fae5" : "white",
+                    border: `2px solid ${done ? "#10b981" : "var(--border-clay)"}`,
+                    boxShadow: done ? "none" : `2px 2px 0 ${accent}44`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontWeight: 800, fontSize: 13, color: done ? "#059669" : accent, flexShrink: 0,
+                  }}>
+                    {done ? "✓" : i + 1}
                   </div>
 
-                  {/* Resource rows */}
-                  <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {day.resources.map((res, resIdx) => {
-                      const done = isDone(dayIdx, resIdx);
-                      const isPdf = res.type === "pdf";
-                      const resColor = isPdf ? "#059669" : "#ef4444";
-                      const resBg = isPdf ? "#d1fae5" : "#fee2e2";
+                  {/* Type icon */}
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 9, background: done ? "#d1fae5" : typeBg,
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  }}>
+                    {isPdf
+                      ? <FileText className="w-4 h-4" style={{ color: done ? "#10b981" : typeColor }} />
+                      : <Play className="w-4 h-4" fill={done ? "#10b981" : typeColor} style={{ color: done ? "#10b981" : typeColor }} />}
+                  </div>
 
-                      return (
-                        <motion.div
-                          key={resIdx}
-                          whileTap={{ scale: 0.985 }}
-                          onClick={() => openSidebar(dayIdx, resIdx, res)}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 12,
-                            padding: "12px 16px", borderRadius: 14,
-                            background: done ? "#f0fdf4" : "white",
-                            border: `2px solid ${done ? "#10b981" : "var(--border-clay)"}`,
-                            boxShadow: done ? "none" : "3px 3px 0 var(--border-clay)",
-                            cursor: "pointer", transition: "all 0.18s",
-                          }}
-                        >
-                          {/* Type icon */}
-                          <div style={{
-                            width: 34, height: 34, borderRadius: 10, background: done ? "#d1fae5" : resBg,
-                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                          }}>
-                            {isPdf
-                              ? <FileText className="w-4 h-4" style={{ color: done ? "#10b981" : resColor }} />
-                              : <Play className="w-4 h-4" fill={done ? "#10b981" : resColor} style={{ color: done ? "#10b981" : resColor }} />}
-                          </div>
+                  {/* Content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: done ? "#10b981" : typeColor, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 1 }}>
+                      {isPdf ? "PDF" : "Video"}
+                    </div>
+                    <div style={{
+                      fontSize: 14, fontWeight: 700,
+                      color: done ? "#065f46" : "var(--navy)",
+                      textDecoration: done ? "line-through" : "none",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>
+                      {res.title}
+                    </div>
+                    {isPdf && res.pdf_name && (
+                      <div style={{
+                        marginTop: 3, display: "inline-flex", alignItems: "center", gap: 4,
+                        fontSize: 11, fontWeight: 600, color: "#64748b",
+                      }}>
+                        <BookOpen className="w-3 h-3" /> {res.pdf_name}
+                      </div>
+                    )}
+                  </div>
 
-                          {/* Content */}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            {/* Resource type label */}
-                            <div style={{ fontSize: 10, fontWeight: 800, color: done ? "#10b981" : resColor, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 1 }}>
-                              {isPdf ? "PDF Reading" : "Video"}
-                            </div>
-                            {/* Title */}
-                            <div style={{
-                              fontSize: 14, fontWeight: 700,
-                              color: done ? "#065f46" : "var(--navy)",
-                              textDecoration: done ? "line-through" : "none",
-                              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                            }}>
-                              {res.title}
-                            </div>
-                            {/* PDF badge: filename + page range */}
-                            {isPdf && (res.pdf_name || res.page_range) && (
-                              <div style={{
-                                marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4,
-                                fontSize: 11, fontWeight: 700, color: "#059669",
-                                background: "#d1fae5", padding: "2px 8px", borderRadius: 100,
-                                border: "1.5px solid #6ee7b7",
-                              }}>
-                                <BookOpen className="w-3 h-3" />
-                                {res.pdf_name}{res.page_range ? ` · ${res.page_range}` : ""}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Done toggle + arrow */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                            <div
-                              onClick={(e) => { e.stopPropagation(); toggleDone(dayIdx, resIdx); }}
-                              style={{ cursor: "pointer", lineHeight: 0 }}
-                            >
-                              {done
-                                ? <CheckCircle className="w-5 h-5" style={{ color: "#10b981" }} />
-                                : <Circle className="w-5 h-5" style={{ color: "#cbd5e1" }} />}
-                            </div>
-                            <ChevronRight className="w-4 h-4" style={{ color: "#94a3b8" }} />
-                          </div>
-                        </motion.div>
-                      );
-                    })}
+                  {/* Duration + actions */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    {res.estimated_minutes > 0 && (
+                      <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+                        {res.estimated_minutes}m
+                      </span>
+                    )}
+                    <div onClick={(e) => { e.stopPropagation(); toggleDone(i); }} style={{ cursor: "pointer", lineHeight: 0 }}>
+                      {done
+                        ? <CheckCircle className="w-5 h-5" style={{ color: "#10b981" }} />
+                        : <Circle className="w-5 h-5" style={{ color: "#cbd5e1" }} />}
+                    </div>
+                    <ChevronRight className="w-4 h-4" style={{ color: "#94a3b8" }} />
                   </div>
                 </motion.div>
               );
@@ -544,7 +486,7 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
           </div>
         )}
 
-        {/* ── Completion celebration ─────────────────────────────────────── */}
+        {/* ── Completion ────────────────────────────────────────────────── */}
         {pct === 100 && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -553,11 +495,9 @@ export default function RoadmapPage({ params }: { params: Promise<{ id: string }
             style={{ marginTop: 28, padding: "36px 32px", borderRadius: 24, textAlign: "center" }}
           >
             <div style={{ fontSize: 52, marginBottom: 12 }}>🎉</div>
-            <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 8 }}>You completed this roadmap!</h2>
-            <p style={{ color: "#166534", marginBottom: 20 }}>Amazing work. Ready for your next challenge?</p>
-            <Link href="/dashboard" className="btn-clay btn-navy" style={{ display: "inline-flex" }}>
-              Back to Dashboard →
-            </Link>
+            <h2 style={{ fontSize: 26, fontWeight: 800, marginBottom: 8 }}>Roadmap complete!</h2>
+            <p style={{ color: "#166534", marginBottom: 20 }}>Amazing work. Ready for the next challenge?</p>
+            <Link href="/dashboard" className="btn-clay btn-navy" style={{ display: "inline-flex" }}>Back to Dashboard →</Link>
           </motion.div>
         )}
       </main>

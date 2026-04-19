@@ -1,7 +1,12 @@
 """
 EmbeddingService — OpenAI text-embedding-3-small kullanarak
-PDF chunk'ları ve Video transcript'leri vektöre dönüştürür.
-Ardından cosine similarity ile anlamsal eşleştirme yapar.
+PDF'ler ve Video transcript'lerini vektöre dönüştürür.
+ClusteringService — Her PDF'i ilgili videolarla eşleştirir.
+
+Yeni Kurgu:
+  PDF bütün olarak ele alınır (parçalanmaz).
+  Her videonun hangi PDF'e en çok benzediği bulunur.
+  Sonuç: PDF1 → [Video A, Video C], PDF2 → [Video B, Video D], ...
 """
 import os
 import numpy as np
@@ -10,160 +15,144 @@ from openai import OpenAI
 
 class EmbeddingService:
     def __init__(self):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        api_key = os.getenv("OPENAI_API_KEY")
+        self.client = OpenAI(api_key=api_key) if api_key else None
         self.model = "text-embedding-3-small"
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts and return their vectors."""
-        # OpenAI allows up to 2048 items per batch
+        if not self.client:
+            raise ValueError("OPENAI_API_KEY is not set.")
+        if not texts:
+            return []
+        # Clean empty strings
+        clean = [t if t.strip() else "empty" for t in texts]
         response = self.client.embeddings.create(
             model=self.model,
-            input=texts,
+            input=clean,
         )
         return [item.embedding for item in response.data]
 
     @staticmethod
     def cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Compute cosine similarity between two vectors."""
-        a_arr = np.array(a)
-        b_arr = np.array(b)
-        return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
+        a_arr, b_arr = np.array(a), np.array(b)
+        norm = np.linalg.norm(a_arr) * np.linalg.norm(b_arr)
+        if norm == 0:
+            return 0.0
+        return float(np.dot(a_arr, b_arr) / norm)
 
 
 class ClusteringService:
     """
-    Given embedded PDF chunks and video transcripts,
-    groups them into TopicGroups based on semantic similarity.
+    Her tam PDF'i bir ünite olarak ele alır.
+    Her videoyu, en benzer PDF'e atar.
+    Eşleşemeyen videolar "Ek Videolar" grubuna düşer.
     """
 
-    def __init__(self, similarity_threshold: float = 0.45):
+    def __init__(self, similarity_threshold: float = 0.35):
         self.threshold = similarity_threshold
         self.embedding_service = EmbeddingService()
 
     def build_topic_groups(
         self,
-        pdf_chunks: list[dict],   # [{filename, page_start, page_end, text, word_count}]
+        pdf_items: list[dict],    # [{filename, num_pages, word_count, estimated_study_hours, text_summary}]
         video_items: list[dict],  # [{id, title, url, duration_minutes, transcript}]
     ) -> list[dict]:
         """
-        1. Embed all chunks and transcripts
-        2. Match each video to its most similar PDF chunk (and vice versa)
-        3. Build TopicGroups that pair related resources together
+        1. Embed each whole PDF and each video
+        2. Assign each video to its best-matching PDF
+        3. Return ordered groups: PDF1 + videos, PDF2 + videos, leftover videos
 
         Returns: [
             {
-                "topic_label": "...",
-                "pdf_resources": [{filename, page_range, text_preview, word_count}],
-                "video_resources": [{id, title, url, duration_minutes}],
+                "topic_label": "PDF filename or topic",
+                "pdf": {filename, num_pages, word_count, estimated_study_hours} or None,
+                "videos": [{id, title, url, duration_minutes}, ...],
                 "estimated_minutes": int,
             }
         ]
         """
-        # ── 1. Prepare texts for embedding ────────────────────────────────
-        pdf_texts = []
-        for chunk in pdf_chunks:
-            pdf_texts.append(chunk["text"][:2000])  # trim for embedding cost
-
-        video_texts = []
-        for vid in video_items:
-            # Use transcript if available, fallback to title
-            text = vid.get("transcript") or vid["title"]
-            video_texts.append(text[:2000])
+        # ── 1. Prepare texts ──────────────────────────────────────────────
+        pdf_texts = [p.get("text_summary", "")[:3000] for p in pdf_items]
+        video_texts = [
+            (v.get("transcript") or v["title"])[:2000]
+            for v in video_items
+        ]
 
         if not pdf_texts and not video_texts:
             return []
 
-        # ── 2. Embed everything in one batch ──────────────────────────────
+        # ── 2. Embed everything ───────────────────────────────────────────
         all_texts = pdf_texts + video_texts
         all_embeddings = self.embedding_service.embed_texts(all_texts)
 
-        pdf_embeddings = all_embeddings[:len(pdf_texts)]
-        video_embeddings = all_embeddings[len(pdf_texts):]
+        pdf_embs = all_embeddings[:len(pdf_texts)]
+        vid_embs = all_embeddings[len(pdf_texts):]
 
-        # ── 3. Build similarity matrix and create groups ──────────────────
+        # ── 3. Assign each video to best PDF ──────────────────────────────
+        # pdf_video_map[pdf_idx] = [video_idx, ...]
+        pdf_video_map: dict[int, list[int]] = {i: [] for i in range(len(pdf_items))}
+        unmatched_videos: list[int] = []
+
+        for vi, v_emb in enumerate(vid_embs):
+            best_pi = -1
+            best_sim = -1.0
+
+            for pi, p_emb in enumerate(pdf_embs):
+                sim = EmbeddingService.cosine_similarity(p_emb, v_emb)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_pi = pi
+
+            if best_sim >= self.threshold and best_pi >= 0:
+                pdf_video_map[best_pi].append(vi)
+            else:
+                unmatched_videos.append(vi)
+
+        # ── 4. Build ordered groups: PDF → related videos ─────────────────
         groups = []
-        used_pdfs = set()
-        used_videos = set()
 
-        # Strategy: For each PDF chunk, find the best matching video
-        if pdf_embeddings and video_embeddings:
-            for pi, p_emb in enumerate(pdf_embeddings):
-                best_vi = -1
-                best_sim = -1
-                for vi, v_emb in enumerate(video_embeddings):
-                    if vi in used_videos:
-                        continue
-                    sim = EmbeddingService.cosine_similarity(p_emb, v_emb)
-                    if sim > best_sim:
-                        best_sim = sim
-                        best_vi = vi
+        for pi, pdf in enumerate(pdf_items):
+            matched_vids = [video_items[vi] for vi in pdf_video_map[pi]]
+            video_minutes = sum(v["duration_minutes"] for v in matched_vids)
+            pdf_minutes = pdf.get("estimated_study_hours", 1) * 60
 
-                if best_sim >= self.threshold and best_vi >= 0:
-                    # Matched pair!
-                    chunk = pdf_chunks[pi]
-                    vid = video_items[best_vi]
-                    groups.append({
-                        "topic_label": vid["title"],  # Use video title as label
-                        "pdf_resources": [{
-                            "filename": chunk["filename"],
-                            "page_range": f"Pages {chunk['page_start']}-{chunk['page_end']}",
-                            "text_preview": chunk["text"][:300],
-                            "word_count": chunk["word_count"],
-                        }],
-                        "video_resources": [{
-                            "id": vid["id"],
-                            "title": vid["title"],
-                            "url": vid["url"],
-                            "duration_minutes": vid["duration_minutes"],
-                        }],
-                        "estimated_minutes": int(vid["duration_minutes"] + chunk["word_count"] / 250),
-                    })
-                    used_pdfs.add(pi)
-                    used_videos.add(best_vi)
-                else:
-                    # Unmatched PDF chunk — standalone
-                    chunk = pdf_chunks[pi]
-                    groups.append({
-                        "topic_label": f"{chunk['filename']} (p.{chunk['page_start']}-{chunk['page_end']})",
-                        "pdf_resources": [{
-                            "filename": chunk["filename"],
-                            "page_range": f"Pages {chunk['page_start']}-{chunk['page_end']}",
-                            "text_preview": chunk["text"][:300],
-                            "word_count": chunk["word_count"],
-                        }],
-                        "video_resources": [],
-                        "estimated_minutes": int(chunk["word_count"] / 250),
-                    })
-                    used_pdfs.add(pi)
+            groups.append({
+                "topic_label": pdf["filename"],
+                "pdf": {
+                    "filename": pdf["filename"],
+                    "num_pages": pdf["num_pages"],
+                    "word_count": pdf["word_count"],
+                    "estimated_study_hours": pdf["estimated_study_hours"],
+                },
+                "videos": [
+                    {
+                        "id": v["id"],
+                        "title": v["title"],
+                        "url": v["url"],
+                        "duration_minutes": v["duration_minutes"],
+                    }
+                    for v in matched_vids
+                ],
+                "estimated_minutes": int(pdf_minutes + video_minutes),
+            })
 
-        # Add any remaining unmatched PDFs
-        for pi, chunk in enumerate(pdf_chunks):
-            if pi not in used_pdfs:
-                groups.append({
-                    "topic_label": f"{chunk['filename']} (p.{chunk['page_start']}-{chunk['page_end']})",
-                    "pdf_resources": [{
-                        "filename": chunk["filename"],
-                        "page_range": f"Pages {chunk['page_start']}-{chunk['page_end']}",
-                        "text_preview": chunk["text"][:300],
-                        "word_count": chunk["word_count"],
-                    }],
-                    "video_resources": [],
-                    "estimated_minutes": int(chunk["word_count"] / 250),
-                })
-
-        # Add any remaining unmatched videos
-        for vi, vid in enumerate(video_items):
-            if vi not in used_videos:
-                groups.append({
-                    "topic_label": vid["title"],
-                    "pdf_resources": [],
-                    "video_resources": [{
-                        "id": vid["id"],
-                        "title": vid["title"],
-                        "url": vid["url"],
-                        "duration_minutes": vid["duration_minutes"],
-                    }],
-                    "estimated_minutes": int(vid["duration_minutes"]),
-                })
+        # ── 5. Unmatched videos go into a final group ─────────────────────
+        if unmatched_videos:
+            leftover = [video_items[vi] for vi in unmatched_videos]
+            groups.append({
+                "topic_label": "Additional Video Lessons",
+                "pdf": None,
+                "videos": [
+                    {
+                        "id": v["id"],
+                        "title": v["title"],
+                        "url": v["url"],
+                        "duration_minutes": v["duration_minutes"],
+                    }
+                    for v in leftover
+                ],
+                "estimated_minutes": int(sum(v["duration_minutes"] for v in leftover)),
+            })
 
         return groups

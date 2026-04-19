@@ -2,10 +2,9 @@ from typing import Optional, List
 import json
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import os
 from dotenv import load_dotenv
 
-from services.youtube_service import YouTubeService, extract_video_id
+from services.youtube_service import YouTubeService
 from services.pdf_service import PDFService
 from services.transcript_service import TranscriptService
 from services.embedding_service import ClusteringService
@@ -13,7 +12,7 @@ from services.planner_service import PlannerService
 
 load_dotenv()
 
-app = FastAPI(title="AI Planner API", version="3.0.0")
+app = FastAPI(title="AI Planner API", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,25 +25,23 @@ app.add_middleware(
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "AI Planner Backend v3 — Semantic Pipeline"}
+    return {"status": "ok", "message": "AI Planner Backend v4 — Simplified Pipeline"}
 
 
 @app.post("/api/plan")
 async def generate_plan(
     files: Optional[List[UploadFile]] = File(default=[]),
     youtube_urls: Optional[str] = Form(default="[]"),
-    mode: str = Form(...),
-    daily_hours: Optional[str] = Form(default=None),
-    target_date: Optional[str] = Form(default=None),
+    target_date: Optional[str] = Form(default=None),   # stored, not used for scheduling yet
 ):
     pdf_service = PDFService()
     yt_service = YouTubeService()
     transcript_service = TranscriptService()
     planner_service = PlannerService()
 
-    # ── 1. Process PDFs into Chunks ──────────────────────────────────────
-    all_pdf_chunks = []   # [{filename, page_start, page_end, text, word_count}]
-    pdf_summaries = []    # For fallback plain text summary
+    # ── 1. Process PDFs ───────────────────────────────────────────────────
+    pdf_items = []
+    pdf_summaries = []
 
     if files:
         for upload in files:
@@ -52,25 +49,25 @@ async def generate_plan(
                 continue
             file_bytes = await upload.read()
             try:
-                chunks = pdf_service.extract_chunks(file_bytes, chunk_size=5)
-                for c in chunks:
-                    c["filename"] = upload.filename
-                all_pdf_chunks.extend(chunks)
-
-                # Also build a plain summary for the planner prompt
-                meta = pdf_service.extract_text(file_bytes)
+                data = pdf_service.extract_text(file_bytes)
+                pdf_items.append({
+                    "filename": upload.filename,
+                    "num_pages": data["num_pages"],
+                    "word_count": data["word_count"],
+                    "estimated_study_hours": data["estimated_study_hours"],
+                    "text_summary": data["text_content"],
+                })
                 pdf_summaries.append(
                     f"### PDF: {upload.filename}\n"
-                    f"- Pages: {meta['num_pages']}, Words: {meta['word_count']}, "
-                    f"Est. study: {meta['estimated_study_hours']}h\n"
-                    f"Content:\n{meta['text_content'][:8000]}"
+                    f"- Pages: {data['num_pages']}, Est. study: {data['estimated_study_hours']}h\n"
+                    f"Content:\n{data['text_content'][:8000]}"
                 )
             except Exception as e:
                 pdf_summaries.append(f"### PDF: {upload.filename}\n[Error: {e}]")
 
-    # ── 2. Process YouTube URLs + Transcripts ────────────────────────────
-    all_video_items = []  # [{id, title, url, duration_minutes, transcript}]
-    video_summaries = []  # For fallback
+    # ── 2. Process YouTube URLs + Transcripts ─────────────────────────────
+    video_items = []
+    video_summaries = []
 
     try:
         urls: List[str] = json.loads(youtube_urls)
@@ -85,94 +82,60 @@ async def generate_plan(
             try:
                 videos = yt_service.process_url(url)
                 for v in videos:
-                    # Fetch transcript for semantic matching
                     transcript = transcript_service.get_transcript(v["id"])
-                    v_url = f"https://youtube.com/watch?v={v['id']}"
-
-                    all_video_items.append({
+                    video_items.append({
                         "id": v["id"],
                         "title": v["title"],
-                        "url": v_url,
+                        "url": f"https://youtube.com/watch?v={v['id']}",
                         "duration_minutes": v["duration_minutes"],
                         "transcript": transcript,
                     })
-
                 video_lines = "\n".join(
-                    f"  - {v['title']} (URL: https://youtube.com/watch?v={v['id']}, "
-                    f"Duration: {v['duration_minutes']}min)"
+                    f"  - {v['title']} (URL: https://youtube.com/watch?v={v['id']}, {v['duration_minutes']}min)"
                     for v in videos
                 )
-                video_summaries.append(
-                    f"### YouTube: {url}\n"
-                    f"- {len(videos)} video(s)\n"
-                    f"Videos:\n{video_lines}"
-                )
+                video_summaries.append(f"### YouTube: {url}\n{video_lines}")
             except Exception as e:
                 video_summaries.append(f"### YouTube: {url}\n[Error: {e}]")
 
-    if not all_pdf_chunks and not all_video_items:
+    if not pdf_items and not video_items:
         raise HTTPException(status_code=400, detail="No valid materials provided.")
 
-    # ── 3. Semantic Clustering (if both types exist) ─────────────────────
+    # ── 3. Semantic Grouping ──────────────────────────────────────────────
     topic_groups = None
-    has_both = len(all_pdf_chunks) > 0 and len(all_video_items) > 0
-
-    if has_both:
+    if pdf_items and video_items:
         try:
-            clustering = ClusteringService(similarity_threshold=0.40)
-            topic_groups = clustering.build_topic_groups(all_pdf_chunks, all_video_items)
+            clustering = ClusteringService(similarity_threshold=0.35)
+            topic_groups = clustering.build_topic_groups(pdf_items, video_items)
         except Exception as e:
-            print(f"[WARN] Clustering failed, falling back to plain summary: {e}")
-            topic_groups = None
+            print(f"[WARN] Clustering failed: {e}")
 
-    # ── 4. Build materials summary for Planner ───────────────────────────
+    # ── 4. Build materials summary ────────────────────────────────────────
     if topic_groups:
-        # Semantic-grouped summary
         group_parts = []
         for i, g in enumerate(topic_groups, 1):
-            part = f"### Topic {i}: {g['topic_label']}\n"
-            part += f"Estimated study time: ~{g['estimated_minutes']} minutes\n"
-
-            if g["pdf_resources"]:
-                for pr in g["pdf_resources"]:
-                    part += f"- PDF Resource: {pr['filename']} ({pr['page_range']})\n"
-                    part += f"  Preview: {pr['text_preview'][:200]}...\n"
-
-            if g["video_resources"]:
-                for vr in g["video_resources"]:
-                    part += f"- Video Resource: {vr['title']} (URL: {vr['url']}, {vr['duration_minutes']}min)\n"
-
+            part = f"### Study Unit {i}: {g['topic_label']}\n"
+            if g["pdf"]:
+                p = g["pdf"]
+                part += f"PDF (study first): {p['filename']} — {p['num_pages']} pages, {p['estimated_study_hours']}h\n"
+            if g["videos"]:
+                part += f"Videos to watch after ({len(g['videos'])}):\n"
+                for v in g["videos"]:
+                    part += f"  - {v['title']} | URL: {v['url']} | {v['duration_minutes']}min\n"
             group_parts.append(part)
-
-        materials_summary = (
-            "## SEMANTICALLY GROUPED TOPICS\n"
-            "The following topics have been pre-grouped by semantic similarity. "
-            "PDF and Video resources under the same topic cover the SAME subject.\n"
-            "When scheduling, pair the PDF reading and video watching for the same topic "
-            "on the SAME DAY so the student gets both perspectives.\n\n"
-            + "\n\n".join(group_parts)
-        )
+        materials_summary = "\n\n".join(group_parts)
     else:
-        # Fallback: plain summary (e.g. only PDFs or only videos)
         materials_summary = "\n\n".join(pdf_summaries + video_summaries)
 
-    # ── 5. Build constraints ─────────────────────────────────────────────
-    constraints = {"mode": mode}
-    if mode == "daily_hours" and daily_hours:
-        constraints["daily_hours"] = float(daily_hours)
-    elif mode == "target_date" and target_date:
-        constraints["target_date"] = target_date
-    else:
-        raise HTTPException(status_code=400, detail="Provide daily_hours or target_date.")
-
-    # ── 6. Generate roadmap ──────────────────────────────────────────────
+    # ── 5. Generate roadmap ───────────────────────────────────────────────
     try:
-        roadmap = planner_service.generate_roadmap(materials_summary, constraints)
+        roadmap = planner_service.generate_roadmap(materials_summary, target_date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
 
     return {
         "roadmap": roadmap,
-        "materials_count": len(all_pdf_chunks) + len(all_video_items),
+        "materials_count": len(pdf_items) + len(video_items),
         "semantic_groups": len(topic_groups) if topic_groups else 0,
+        "target_date": target_date,
     }

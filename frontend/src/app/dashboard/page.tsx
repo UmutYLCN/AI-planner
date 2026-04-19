@@ -28,11 +28,10 @@ export default function DashboardPage() {
   };
 
   const calcProgress = (r: RoadmapRecord) => {
-    const days = r.roadmap.days ?? [];
-    const totalRes = days.reduce((a, d) => a + d.resources.length, 0);
-    if (totalRes === 0) return 0;
-    const done = Object.values(r.progress).filter(Boolean).length;
-    return Math.round((done / totalRes) * 100);
+    const resources = r.roadmap?.resources ?? [];
+    if (resources.length === 0) return 0;
+    const done = Object.values(r.progress || {}).filter(Boolean).length;
+    return Math.round((done / resources.length) * 100);
   };
 
   const CARD_COLORS = [
@@ -94,10 +93,10 @@ export default function DashboardPage() {
                 color: "clay-card-green"
               },
               {
-                label: "Hours Planned",
-                value: `${roadmaps.reduce((a, r) => a + r.roadmap.total_estimated_hours, 0)}h`,
-                icon: <Clock className="w-5 h-5" />,
-                color: "clay-card-yellow"
+                  label: "Hours Planned",
+                  value: `${roadmaps.reduce((a, r) => a + (r.roadmap?.total_estimated_hours || 0), 0)}h`,
+                  icon: <Clock className="w-5 h-5" />,
+                  color: "clay-card-yellow"
               },
             ].map((s) => (
               <div key={s.label} className={`clay-card ${s.color}`} style={{ padding: "20px 24px", borderRadius: 18, display: "flex", alignItems: "center", gap: 14 }}>
@@ -150,7 +149,7 @@ export default function DashboardPage() {
                         {/* Header */}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                           <h3 style={{ fontWeight: 700, fontSize: 17, maxWidth: "80%", lineHeight: 1.3 }}>
-                            {r.roadmap.title || r.title}
+                            {r.roadmap?.title || r.title}
                           </h3>
                           <button
                             onClick={(e) => deleteRoadmap(r.id!, e)}
@@ -163,10 +162,10 @@ export default function DashboardPage() {
                         {/* Meta */}
                         <div style={{ display: "flex", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 13, color: "#475569", display: "flex", alignItems: "center", gap: 4 }}>
-                            <Clock className="w-3.5 h-3.5" /> {r.roadmap.total_estimated_hours}h total
+                            <Clock className="w-3.5 h-3.5" /> {r.roadmap?.total_estimated_hours || 0}h total
                           </span>
                           <span style={{ fontSize: 13, color: "#475569", display: "flex", alignItems: "center", gap: 4 }}>
-                            <CalendarDays className="w-3.5 h-3.5" /> {r.roadmap.estimated_finish_date}
+                            <CalendarDays className="w-3.5 h-3.5" /> {r.target_date || "No deadline"}
                           </span>
                         </div>
 
@@ -183,7 +182,7 @@ export default function DashboardPage() {
 
                         {/* Stages count */}
                         <div style={{ fontSize: 13, color: "#64748b", marginTop: 12 }}>
-                          {(r.roadmap.days ?? []).length} days · {(r.roadmap.days ?? []).reduce((a, d) => a + d.resources.length, 0)} resources
+                          {(r.roadmap?.resources ?? []).length} resources
                         </div>
                       </div>
                     </Link>

@@ -1,19 +1,13 @@
 import Dexie, { Table } from "dexie";
 
-export interface DayResource {
+export interface RoadmapResource {
+  order: number;
   type: "pdf" | "video";
   title: string;
   pdf_name?: string;
-  page_range?: string;
   youtube_url?: string;
   topics: string[];
   estimated_minutes: number;
-}
-
-export interface RoadmapDay {
-  day: number;
-  total_hours: number;
-  resources: DayResource[];
 }
 
 export interface RoadmapRecord {
@@ -21,19 +15,13 @@ export interface RoadmapRecord {
   title: string;
   sourceType: "pdf" | "youtube" | "mixed";
   materialNames: string[];
-  constraints: {
-    mode: "daily_hours" | "target_date";
-    daily_hours?: number;
-    target_date?: string;
-  };
+  target_date?: string;                    // stored for future use
   roadmap: {
     title: string;
     total_estimated_hours: number;
-    recommended_daily_hours: number;
-    estimated_finish_date: string;
-    days: RoadmapDay[];
+    resources: RoadmapResource[];
   };
-  progress: Record<string, boolean>; // key: "dayIdx-resIdx"
+  progress: Record<string, boolean>;       // key: resource order index (string)
   attachedFiles?: Array<{ name: string; data: Blob }>;
   createdAt: Date;
 }
@@ -43,7 +31,7 @@ class AIplannerDB extends Dexie {
 
   constructor() {
     super("AIplannerDB");
-    this.version(2).stores({
+    this.version(3).stores({
       roadmaps: "++id, createdAt, title",
     });
   }
