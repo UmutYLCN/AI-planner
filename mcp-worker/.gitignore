@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.log
+
+# Never commit Firebase service-account credentials
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+*.pem
+*.key

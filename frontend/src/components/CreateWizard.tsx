@@ -7,6 +7,7 @@ import {
   Settings, Layers, ListChecks
 } from "lucide-react";
 import { db } from "@/lib/db";
+import { apiUrl } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -63,7 +64,7 @@ export default function CreateWizard({ onClose, onCreated }: Props) {
       formData.append("strict_mode", strictMode.toString());
       formData.append("granularity", granularity);
 
-      const res = await fetch("http://localhost:8000/api/plan", {
+      const res = await fetch(apiUrl("/api/plan"), {
         method: "POST",
         body: formData,
       });

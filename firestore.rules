@@ -1,0 +1,97 @@
+rules_version = '2';
+
+// AI Planner — single-user Firestore rules.
+//
+// Only Claude-created cloud tasks live in Firestore. Roadmaps, PDFs and roadmap progress
+// stay in the browser's Dexie/IndexedDB store and are never written here.
+//
+// SETUP: replace OWNER_UID below with your own Firebase Auth UID
+// (Firebase Console > Authentication > Users > User UID), then deploy:
+//   firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // The one account allowed to touch any data at all.
+    function ownerUid() {
+      return '6TQobaxN1YYZprQv2Md5rrbOMzw2';
+    }
+
+    function isOwner(userId) {
+      return request.auth != null
+        && request.auth.uid == userId
+        && userId == ownerUid();
+    }
+
+    // Exactly the fields a task document may contain — nothing more, nothing less.
+    function requiredTaskFields() {
+      return ['id', 'title', 'subject', 'source_skill', 'description',
+              'due_date', 'status', 'idempotency_key',
+              'created_at', 'updated_at', 'completed_at'];
+    }
+
+    function hasOnlyKnownFields(data) {
+      return data.keys().hasOnly(requiredTaskFields())
+        && data.keys().hasAll(requiredTaskFields());
+    }
+
+    // due_date is a local calendar day (Europe/Istanbul), stored as a plain
+    // 'YYYY-MM-DD' string — never a timestamp, so it can never drift by a day.
+    function isCalendarDate(value) {
+      return value is string && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function hasValidShape(data, taskId) {
+      return hasOnlyKnownFields(data)
+        && data.id is string && data.id == taskId
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.subject is string && data.subject.size() > 0 && data.subject.size() <= 80
+        && data.source_skill is string && data.source_skill.size() > 0 && data.source_skill.size() <= 100
+        && data.description is string && data.description.size() <= 2000
+        && isCalendarDate(data.due_date)
+        && data.idempotency_key is string && data.idempotency_key.size() > 0 && data.idempotency_key.size() <= 400
+        && (data.status == 'todo' || data.status == 'done')
+        && data.created_at is timestamp
+        && data.updated_at is timestamp
+        && (data.completed_at == null || data.completed_at is timestamp);
+    }
+
+    // A task always starts life as 'todo' with no completion time.
+    function isValidCreate(data, taskId) {
+      return hasValidShape(data, taskId)
+        && data.status == 'todo'
+        && data.completed_at == null
+        && data.created_at == request.time
+        && data.updated_at == request.time;
+    }
+
+    // Only the completion state may change afterwards, and every write re-stamps updated_at.
+    function isValidUpdate(before, after, taskId) {
+      return hasValidShape(after, taskId)
+        && after.id == before.id
+        && after.title == before.title
+        && after.subject == before.subject
+        && after.source_skill == before.source_skill
+        && after.description == before.description
+        && after.due_date == before.due_date
+        && after.idempotency_key == before.idempotency_key
+        && after.created_at == before.created_at
+        && after.updated_at == request.time
+        && (
+          (after.status == 'done' && after.completed_at == request.time)
+          || (after.status == 'todo' && after.completed_at == null)
+        );
+    }
+
+    match /users/{userId}/tasks/{taskId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidCreate(request.resource.data, taskId);
+      allow update: if isOwner(userId) && isValidUpdate(resource.data, request.resource.data, taskId);
+      allow delete: if isOwner(userId);
+    }
+
+    // Everything else — including any other user's documents — is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

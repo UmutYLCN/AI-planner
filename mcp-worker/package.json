@@ -1,0 +1,26 @@
+{
+  "name": "ai-planner-mcp-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote Streamable HTTP MCP server (Cloudflare Worker) that writes Claude-generated study tasks into Firestore.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
+  }
+}

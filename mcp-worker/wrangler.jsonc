@@ -1,0 +1,26 @@
+{
+  // Cloudflare Worker config for the AI Planner remote MCP server.
+  // NEVER put secret values in this file — use `wrangler secret put <NAME>` instead.
+  // See ./README.md and ../SETUP_FREE.md for the full setup walkthrough.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-planner-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      // Stores OAuth clients, grants and tokens for @cloudflare/workers-oauth-provider.
+      // Create it with:  npx wrangler kv namespace create OAUTH_KV
+      // then paste the returned id below.
+      "binding": "OAUTH_KV",
+      "id": "b349d896f4e6407e87fff5717b8f575d"
+    }
+  ],
+  "vars": {
+    // Non-secret defaults only. Real values are set with `wrangler secret put`.
+    "MCP_SERVER_NAME": "ai-planner"
+  }
+}

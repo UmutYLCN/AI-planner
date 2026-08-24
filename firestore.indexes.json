@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "No composite indexes are required.",
+    "Both the MCP Worker and the web app query users/{uid}/tasks with a due_date range",
+    "ordered by due_date only, which Firestore serves from its automatic single-field",
+    "index. Optional source_skill/status filters are applied after the query, inside the",
+    "result limit, so no extra index is ever needed.",
+    "Keeping this list empty also keeps the project comfortably inside the Spark plan."
+  ],
+  "indexes": [],
+  "fieldOverrides": []
+}

@@ -1,0 +1,4 @@
+# Test-only dependencies. Render installs requirements.txt, not this file.
+-r requirements.txt
+pytest
+httpx

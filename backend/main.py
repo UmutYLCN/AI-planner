@@ -1,5 +1,6 @@
 from typing import Optional, List
 import json
+import os
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -12,11 +13,35 @@ from services.planner_service import PlannerService
 
 load_dotenv()
 
+DEFAULT_DEV_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def parse_frontend_origins(raw: Optional[str]) -> List[str]:
+    """Parse FRONTEND_ORIGINS into an explicit allow-list.
+
+    Comma-separated, whitespace-tolerant, order-preserving and de-duplicated.
+    A wildcard is refused: credentials are enabled, so "*" would be both unsafe and
+    rejected by browsers. Falls back to the local dev origins when unset.
+    """
+    if not raw or not raw.strip():
+        return list(DEFAULT_DEV_ORIGINS)
+
+    origins: List[str] = []
+    for candidate in raw.split(","):
+        origin = candidate.strip().rstrip("/")
+        if not origin or origin == "*":
+            continue
+        if origin not in origins:
+            origins.append(origin)
+
+    return origins or list(DEFAULT_DEV_ORIGINS)
+
+
 app = FastAPI(title="AI Planner API", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=parse_frontend_origins(os.getenv("FRONTEND_ORIGINS")),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

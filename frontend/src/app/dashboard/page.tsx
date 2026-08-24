@@ -1,15 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, Plus, Clock, CalendarDays, BarChart2, Trash2 } from "lucide-react";
+import { BookOpen, Plus, Clock, CalendarDays, BarChart2, Trash2, LogOut } from "lucide-react";
 import Link from "next/link";
 import { db, RoadmapRecord } from "@/lib/db";
 import CreateWizard from "@/components/CreateWizard";
+import DashboardCloudTasks from "@/components/tasks/DashboardCloudTasks";
+import { useOwnerAuth } from "@/components/auth/OwnerGate";
 
 export default function DashboardPage() {
   const [roadmaps, setRoadmaps] = useState<RoadmapRecord[]>([]);
   const [showWizard, setShowWizard] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { status: authStatus, signOutOwner } = useOwnerAuth();
 
   const loadRoadmaps = async () => {
     const all = await db.roadmaps.orderBy("createdAt").reverse().toArray();
@@ -57,13 +60,26 @@ export default function DashboardPage() {
           <Link href="/dashboard" style={{ fontWeight: 600, fontSize: 14, textDecoration: "none", padding: "8px 16px", background: "var(--navy)", borderRadius: 100, color: "white" }}>
             Dashboard
           </Link>
-          <Link href="/settings" style={{ fontWeight: 600, fontSize: 14, color: "#64748b", textDecoration: "none", padding: "8px 16px" }}>
-            Settings
+          <Link href="/tasks" style={{ fontWeight: 600, fontSize: 14, color: "#64748b", textDecoration: "none", padding: "8px 16px" }}>
+            Claude Görevleri
           </Link>
+          {authStatus === "ready" && (
+            <button
+              onClick={signOutOwner}
+              title="Kilitle"
+              aria-label="Kilitle"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 8, display: "flex" }}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </nav>
 
       <main style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}>
+        {/* Claude-generated cloud tasks (Firestore) — separate from the local roadmaps below */}
+        <DashboardCloudTasks />
+
         {/* Header row */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 36 }}>
           <div>

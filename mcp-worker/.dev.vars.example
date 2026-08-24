@@ -1,0 +1,20 @@
+# Copy to `.dev.vars` for local `wrangler dev` runs and fill in real values.
+# `.dev.vars` is git-ignored — never commit real credentials.
+# In production these are set with: npx wrangler secret put <NAME>
+
+# --- GitHub OAuth App (protects the /mcp endpoint) ---
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+# Numeric GitHub user id (NOT the username), e.g. 1234567
+GITHUB_ALLOWED_USER_ID=
+# Random 32+ byte secret used to sign the OAuth approval/state cookie.
+# Generate with: openssl rand -hex 32
+COOKIE_ENCRYPTION_KEY=
+
+# --- Firebase service account (Firestore REST access) ---
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+# Paste the full PEM. Escaped "\n" sequences are handled automatically.
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nREPLACE_ME\n-----END PRIVATE KEY-----\n"
+# Firebase Auth UID of the single planner owner (from Firebase Console > Authentication)
+FIREBASE_OWNER_UID=

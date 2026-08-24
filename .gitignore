@@ -42,6 +42,21 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+!.env.example
+
+# cloudflare worker
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# firebase / google service-account credentials — NEVER commit these
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+.firebase/
+firebase-debug.log
+*.key
 
 # vercel
 .vercel
